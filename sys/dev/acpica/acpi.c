@@ -610,6 +610,9 @@ acpi_attach(device_t dev)
     SYSCTL_ADD_INT(&sc->acpi_sysctl_ctx, SYSCTL_CHILDREN(sc->acpi_sysctl_tree),
 	OID_AUTO, "handle_reboot", CTLFLAG_RW,
 	&sc->acpi_handle_reboot, 0, "Use ACPI Reset Register to reboot");
+    SYSCTL_ADD_INT(&sc->acpi_sysctl_ctx, SYSCTL_CHILDREN(sc->acpi_sysctl_tree),
+	OID_AUTO, "s0ix_level", CTLFLAG_RD,
+	&sc->acpi_s0ix_level, 0, "S0ix support level bitfield");
 
     /*
      * Default to 1 second before sleeping to give some machines time to
@@ -641,6 +644,10 @@ acpi_attach(device_t dev)
 	    __DECONST(char *, AcpiGbl_SleepStateNames[state]), NULL, NULL)) &&
 	    ACPI_SUCCESS(AcpiGetSleepTypeData(state, &TypeA, &TypeB)))
 	    acpi_sleep_states[state] = TRUE;
+
+    /* Check if LPI capable platform. */
+    if (AcpiGbl_FADT.Flags & ACPI_FADT_LOW_POWER_S0)
+       sc->acpi_s0ix_level = ACPI_S0IX_LEVEL_FADT21;
 
     /*
      * Dispatch the default sleep state to devices.  The lid switch is set

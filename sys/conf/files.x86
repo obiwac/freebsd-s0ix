@@ -50,7 +50,9 @@ crypto/via/padlock.c		optional padlock
 crypto/via/padlock_cipher.c	optional padlock
 crypto/via/padlock_hash.c	optional padlock
 dev/acpica/acpi_hpet.c		optional	acpi
+dev/acpica/acpi_lpit.c		optional	acpi
 dev/acpica/acpi_if.m		standard
+# dev/acpica/acpi_ospm.c		optional	acpi
 dev/acpica/acpi_pci.c		optional	acpi pci
 dev/acpica/acpi_pci_link.c	optional	acpi pci
 dev/acpica/acpi_pcib.c		optional	acpi pci

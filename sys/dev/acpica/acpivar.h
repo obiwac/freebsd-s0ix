@@ -71,6 +71,12 @@ struct acpi_softc {
     int			acpi_verbose;
     int			acpi_handle_reboot;
 
+#define ACPI_S0IX_LEVEL_FADT21	(1 << 0)
+#define ACPI_S0IX_LEVEL_LPIT	(1 << 1)
+#define ACPI_S0IX_LEVEL_DSM	(1 << 2)
+    int			acpi_s0ix_level;
+    device_t		acpi_lpi_dev;
+
     vm_offset_t		acpi_wakeaddr;
     vm_paddr_t		acpi_wakephys;
 
