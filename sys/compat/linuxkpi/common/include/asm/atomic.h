@@ -53,6 +53,7 @@ typedef struct {
 #define	atomic_inc_and_test(v)		(atomic_add_return(1, (v)) == 0)
 #define	atomic_dec_return(v)		atomic_sub_return(1, (v))
 #define	atomic_inc_not_zero(v)		atomic_add_unless((v), 1, 0)
+#define	atomic_dec_not_one(v)		atomic_add_unless((v), -1, 1)
 
 static inline int
 atomic_add_return(int i, atomic_t *v)
