@@ -89,8 +89,9 @@ struct dev_pm_ops {
 };
 
 struct device_driver {
-	const char	*name;
-	const struct dev_pm_ops *pm;
+	const char			*name;
+	const struct dev_pm_ops 	*pm;
+	struct of_device_id const	*of_match_table;
 };
 
 struct device_type {
@@ -123,6 +124,7 @@ struct device {
 	unsigned int	irq_end;
 	const struct attribute_group **groups;
 	struct fwnode_handle *fwnode;
+	struct device_node	*of_node;
 	struct cdev	*backlight_dev;
 	struct backlight_device	*bd;
 
