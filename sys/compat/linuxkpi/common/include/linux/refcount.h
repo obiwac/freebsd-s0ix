@@ -57,6 +57,12 @@ refcount_dec(refcount_t *ref)
 	atomic_dec(ref);
 }
 
+static inline bool
+refcount_dec_not_one(refcount_t *ref)
+{
+	return (atomic_dec_not_one(ref));
+}
+
 static inline unsigned int
 refcount_read(refcount_t *ref)
 {
