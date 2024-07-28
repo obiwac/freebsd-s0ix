@@ -2,6 +2,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  *
  * Copyright (c) 2020-2022 Bjoern A. Zeeb
+ * Copyright (c) 2024 Aymeric Wibo <obiwac@freebsd.org>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -40,6 +41,8 @@ struct platform_device {
 
 struct platform_driver {
 	int				(*remove)(struct platform_device *);
+	void				(*remove_new)(struct platform_device *);
+	int				(*probe)(struct platform_device *);
 	struct device_driver		driver;
 };
 
@@ -92,6 +95,21 @@ platform_device_unregister(struct platform_device *pdev)
 
 	pr_debug("%s: TODO\n", __func__);
 	return;
+}
+
+static inline int
+platform_get_irq(struct platform_device *pdev, uint32_t irq)
+{
+
+	pr_debug("%s: TODO\n", __func__);
+	return (0);
+}
+
+static inline void
+platform_set_drvdata(struct platform_device *pdev, void *data)
+{
+
+	dev_set_drvdata(&pdev->dev, data);
 }
 
 #endif	/* _LINUXKPI_LINUX_PLATFORM_DEVICE_H */
