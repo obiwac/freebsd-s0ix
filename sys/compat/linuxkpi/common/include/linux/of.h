@@ -2,6 +2,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  *
  * Copyright (c) 2023 Serenity Cyber Security, LLC.
+ * Copyright (c) 2024 Aymeric Wibo <obiwac@freebsd.com>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,5 +30,25 @@
 #define	_LINUXKPI_LINUX_OF_H
 
 #include <linux/kobject.h>
+#include <linux/device.h>
+
+struct device_node {
+};
+
+static inline int
+of_device_is_compatible(const struct device_node *device, const char *name)
+{
+
+	pr_debug("%s: TODO\n", __func__);
+	return 0;
+}
+
+static inline const void *
+of_device_get_match_data(const struct device *dev)
+{
+
+	pr_debug("%s: TODO\n", __func__);
+	return NULL;
+}
 
 #endif
