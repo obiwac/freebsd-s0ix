@@ -81,6 +81,8 @@ struct dmi_system_id {
 #define	ACPI_ID_LEN		16
 
 struct of_device_id {
+	char compatible[32];
+	void const *data;
 };
 
 #endif	/* __LINUXKPI_LINUX_MOD_DEVICETABLE_H__ */
