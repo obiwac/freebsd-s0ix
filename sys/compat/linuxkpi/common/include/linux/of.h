@@ -51,4 +51,28 @@ of_device_get_match_data(const struct device *dev)
 	return NULL;
 }
 
+
+static inline struct device_node *
+of_find_matching_node_and_match(struct device_node *from, const struct of_device_id *matches, const struct of_device_id **match)
+{
+
+	pr_debug("%s: TODO\n", __func__);
+	return NULL;
+}
+
+static inline void
+of_node_put(struct device_node *node)
+{
+
+	pr_debug("%s: TODO\n", __func__);
+}
+
+static inline struct device_node *
+of_find_compatible_node(struct device_node *from, const char *type, const char *compat)
+{
+
+	pr_debug("%s: TODO\n", __func__);
+	return NULL;
+}
+
 #endif
