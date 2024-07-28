@@ -43,6 +43,7 @@ struct debugfs_reg32 {
 struct debugfs_regset32 {
 	const struct debugfs_reg32 *regs;
 	int nregs;
+	void *base;
 };
 
 struct debugfs_blob_wrapper {
