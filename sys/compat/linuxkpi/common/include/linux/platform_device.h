@@ -43,6 +43,7 @@ struct platform_driver {
 	int				(*remove)(struct platform_device *);
 	void				(*remove_new)(struct platform_device *);
 	int				(*probe)(struct platform_device *);
+	void				(*shutdown)(struct platform_device *);
 	struct device_driver		driver;
 };
 
@@ -110,6 +111,55 @@ platform_set_drvdata(struct platform_device *pdev, void *data)
 {
 
 	dev_set_drvdata(&pdev->dev, data);
+}
+
+static inline void *
+platform_get_drvdata(const struct platform_device *pdev)
+{
+
+	return (dev_get_drvdata(&pdev->dev));
+}
+
+
+
+static inline void*
+devm_platform_get_and_ioremap_resource(struct platform_device *pdev, uint32_t index, struct resource **res)
+{
+
+	pr_debug("%s: TODO\n", __func__);
+	return (NULL);
+}
+
+static inline void*
+devm_platform_ioremap_resource(struct platform_device *pdev, uint32_t index)
+{
+
+	pr_debug("%s: TODO\n", __func__);
+	return (NULL);
+}
+
+static inline struct device *
+platform_find_device_by_driver(struct device *start, struct device_driver const *driver)
+{
+
+	pr_debug("%s: TODO\n", __func__);
+	return (NULL);
+}
+
+static inline int
+platform_register_drivers(struct platform_driver * const *drivers, size_t count)
+{
+
+	pr_debug("%s: TODO\n", __func__);
+	return (0);
+}
+
+static inline void
+platform_unregister_drivers(struct platform_driver * const *drivers, size_t count)
+{
+
+	pr_debug("%s: TODO\n", __func__);
+	return;
 }
 
 #endif	/* _LINUXKPI_LINUX_PLATFORM_DEVICE_H */
