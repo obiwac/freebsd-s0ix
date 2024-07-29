@@ -74,6 +74,13 @@ pm_runtime_put(struct device *dev)
 }
 
 static inline void
+pm_runtime_put_sync(struct device *dev)
+{
+
+	pr_debug("%s: TODO\n", __func__);
+}
+
+static inline void
 pm_runtime_put_sync_suspend(struct device *dev)
 {
 
