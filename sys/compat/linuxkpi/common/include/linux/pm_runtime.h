@@ -53,4 +53,11 @@ pm_runtime_resume_and_get(struct device *dev)
 	return 0;
 }
 
+static inline int
+devm_pm_runtime_enable(struct device *dev)
+{
+	pr_debug("%s: TODO\n", __func__);
+	return 0;
+}
+
 #endif	/* _LINUXKPI_LINUX_PM_RUNTIME_H_ */
