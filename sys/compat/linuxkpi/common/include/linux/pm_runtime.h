@@ -16,7 +16,6 @@
 #define pm_runtime_put_noidle(x) (void)(x)
 #define pm_runtime_forbid(x) (void)(x)
 #define pm_runtime_get_noresume(x) (void)(x)
-#define pm_runtime_put(x) (void)(x)
 #define pm_runtime_enable(x) (void)(x)
 #define pm_runtime_disable(x) (void)(x)
 #define pm_runtime_autosuspend(x) (void)(x)
@@ -60,6 +59,14 @@ pm_runtime_resume_and_get(struct device *dev)
 
 static inline int
 devm_pm_runtime_enable(struct device *dev)
+{
+
+	pr_debug("%s: TODO\n", __func__);
+	return (0);
+}
+
+static inline int
+pm_runtime_put(struct device *dev)
 {
 
 	pr_debug("%s: TODO\n", __func__);
