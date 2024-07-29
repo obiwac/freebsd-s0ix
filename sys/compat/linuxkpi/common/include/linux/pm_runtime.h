@@ -25,45 +25,60 @@
 static inline int
 pm_runtime_get_sync(struct device *dev)
 {
-	return 0;
+
+	return (0);
 }
 
 static inline int
 pm_runtime_get_if_in_use(struct device *dev)
 {
-	return 1;
+
+	return (1);
 }
 
 static inline int
 pm_runtime_get_if_active(struct device *dev, bool x)
 {
-	return 1;
+
+	return (1);
 }
 
 static inline int
 pm_runtime_suspended(struct device *dev)
 {
-	return 0;
+
+	return (0);
 }
 
 static inline int
 pm_runtime_resume_and_get(struct device *dev)
 {
+
 	pr_debug("%s: TODO\n", __func__);
-	return 0;
+	return (0);
 }
 
 static inline int
 devm_pm_runtime_enable(struct device *dev)
 {
+
 	pr_debug("%s: TODO\n", __func__);
-	return 0;
+	return (0);
 }
 
 static inline void
 pm_runtime_put_sync_suspend(struct device *dev)
 {
+
 	pr_debug("%s: TODO\n", __func__);
+}
+
+static inline bool
+pm_runtime_status_suspended(struct device *dev)
+{
+
+	pr_debug("%s: TODO\n", __func__);
+	return (false);
 }
 
 #endif	/* _LINUXKPI_LINUX_PM_RUNTIME_H_ */
