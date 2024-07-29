@@ -32,6 +32,8 @@
 #include <linux/kernel.h>
 #include <linux/device.h>
 
+#define	PLATFORM_DEVID_AUTO	(-2)
+
 struct platform_device {
 	const char			*name;
 	int				id;
@@ -160,6 +162,48 @@ platform_unregister_drivers(struct platform_driver * const *drivers, size_t coun
 
 	pr_debug("%s: TODO\n", __func__);
 	return;
+}
+
+static inline struct platform_device *
+platform_device_register_data(
+	struct device *parent,
+	char const *name,
+	int id,
+	void const *data,
+	size_t size
+)
+{
+
+	pr_debug("%s: TODO\n", __func__);
+	return (NULL);
+}
+
+static inline int
+platform_get_irq_byname(struct platform_device *dev, char const *name)
+{
+
+	pr_debug("%s: TODO\n", __func__);
+	return (0);
+}
+
+struct resource {
+	resource_size_t	start;
+};
+
+static inline resource_size_t
+resource_size(struct resource const *res)
+{
+
+	pr_debug("%s: TODO\n", __func__);
+	return (0);
+}
+
+static inline struct resource *
+platform_get_resource_byname(struct platform_device *dev, uint32_t io_resource, char const *name)
+{
+
+	pr_debug("%s: TODO\n", __func__);
+	return (NULL);
 }
 
 #endif	/* _LINUXKPI_LINUX_PLATFORM_DEVICE_H */
