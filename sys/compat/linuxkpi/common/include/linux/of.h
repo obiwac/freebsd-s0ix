@@ -75,4 +75,12 @@ of_find_compatible_node(struct device_node *from, const char *type, const char *
 	return NULL;
 }
 
+static inline uint32_t *
+of_get_address(struct device_node *dev, int index, uint64_t *size, uint32_t *flags)
+{
+
+	pr_debug("%s: TODO\n", __func__);
+	return (0);
+}
+
 #endif
