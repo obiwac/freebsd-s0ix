@@ -83,4 +83,44 @@ of_get_address(struct device_node *dev, int index, uint64_t *size, uint32_t *fla
 	return (0);
 }
 
+static inline bool
+of_find_property(struct device_node *node, char const *prop, int *len)
+{
+
+	pr_debug("%s: TODO\n", __func__);
+	return (false);
+}
+
+static inline int
+of_property_match_string(struct device_node *node, const char *prop, const char *string)
+{
+
+	pr_debug("%s: TODO\n", __func__);
+	return (0);
+}
+
+static inline struct device_node *
+of_parse_phandle(struct device_node *node, char const *name, int index)
+{
+
+	pr_debug("%s: TODO\n", __func__);
+	return (NULL);
+}
+
+static inline struct i2c_adapter *
+of_find_i2c_adapter_by_node(struct device_node *node)
+{
+
+	pr_debug("%s: TODO\n", __func__);
+	return (NULL);
+}
+
+static inline bool
+of_property_read_bool(struct device_node *node, char const *prop)
+{
+
+	pr_debug("%s: TODO\n", __func__);
+	return (false);
+}
+
 #endif
