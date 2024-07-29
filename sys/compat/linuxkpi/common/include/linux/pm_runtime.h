@@ -60,4 +60,10 @@ devm_pm_runtime_enable(struct device *dev)
 	return 0;
 }
 
+static inline void
+pm_runtime_put_sync_suspend(struct device *dev)
+{
+	pr_debug("%s: TODO\n", __func__);
+}
+
 #endif	/* _LINUXKPI_LINUX_PM_RUNTIME_H_ */
