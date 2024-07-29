@@ -66,6 +66,11 @@ struct dev_pm_info {
 	.poweroff	= _suspendfunc,				\
 	.restore	= _resumefunc,				\
 
+#define	__SET_RUNTIME_PM_OPS(_suspendfunc, _resumefunc, _idlefunc)	\
+	.runtime_suspend	= _suspendfunc,			\
+	.runtime_resume		= _resumefunc,			\
+	.runtime_idle		= _idlefunc,			\
+
 #define	SIMPLE_DEV_PM_OPS(_name, _suspendfunc, _resumefunc)	\
 const struct dev_pm_ops _name = {				\
 	__SET_PM_OPS(_suspendfunc, _resumefunc)			\
@@ -78,6 +83,9 @@ const struct dev_pm_ops _name = {				\
 
 #define	SET_SYSTEM_SLEEP_PM_OPS(_suspendfunc, _resumefunc)	\
 	__SET_PM_OPS(_suspendfunc, _resumefunc)
+
+#define	SET_RUNTIME_PM_OPS(_suspendfunc, _resumefunc, _idlefunc) \
+	__SET_RUNTIME_PM_OPS(_suspendfunc, _resumefunc, _idlefunc)
 #else
 #define	SIMPLE_DEV_PM_OPS(_name, _suspendfunc, _resumefunc)	\
 const struct dev_pm_ops _name = {				\
