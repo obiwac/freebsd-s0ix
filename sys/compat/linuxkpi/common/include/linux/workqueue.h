@@ -64,6 +64,7 @@ struct workqueue_struct {
 #define	WQ_EXEC_UNLOCK(wq) mtx_unlock(&(wq)->exec_mtx)
 
 struct work_struct {
+	struct list_head entry;
 	struct task work_task;
 	struct workqueue_struct *work_queue;
 	work_func_t func;
