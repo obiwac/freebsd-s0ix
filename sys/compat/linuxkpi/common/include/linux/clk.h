@@ -80,17 +80,25 @@ clk_prepare_enable(struct clk *clk)
 }
 
 static inline int
-clk_set_rate(struct clk *clk, uint32_t rate)
+clk_set_rate(struct clk *clk, uint64_t rate)
 {
-	
+
 	pr_debug("%s: TODO\n", __func__);
 	return (0);
 }
 
-static inline uint32_t
+static inline int
+clk_set_min_rate(struct clk *clk, uint64_t rate)
+{
+
+	pr_debug("%s: TODO\n", __func__);
+	return (0);
+}
+
+static inline uint64_t
 clk_get_rate(struct clk *clk)
 {
-	
+
 	pr_debug("%s: TODO\n", __func__);
 	return (0);
 }
