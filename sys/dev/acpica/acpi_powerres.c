@@ -245,7 +245,7 @@ acpi_pwr_register_consumer(ACPI_HANDLE consumer)
     TAILQ_INIT(&pc->ac_references);
     pc->ac_consumer = consumer;
 
-    /* XXX we should try to find its current state */
+    /* XXX we should try to find its current state -> Do this with _PSC */
     pc->ac_state = ACPI_STATE_UNKNOWN;
 
     ACPI_DEBUG_PRINT((ACPI_DB_OBJECTS, "registered power consumer %s\n",
@@ -289,7 +289,131 @@ acpi_pwr_deregister_consumer(ACPI_HANDLE consumer)
 #endif /* notyet */
 
 /*
- * Set a power consumer to a particular power state.
+ * The _PSC control method isn't required if it's possible to infer the D-state
+ * from the _PR* control methods. (See 7.3.6.)
+ * We can infer that a given D-state has been achieved when all the dependencies
+ * are in the ON state.
+ */
+static ACPI_STATUS
+acpi_pwr_infer_state(ACPI_HANDLE consumer, struct acpi_powerconsumer *pc)
+{
+    ACPI_INTEGER	status;
+    ACPI_STRING		reslist_name;
+    ACPI_HANDLE		reslist_handle;
+    ACPI_STRING		reslist_names[] = {"_PR0", "_PR1", "_PR2", "_PR3"};
+    ACPI_BUFFER		result;
+    ACPI_OBJECT		*object;
+    ACPI_OBJECT		*dep;
+    uint32_t		on;
+    bool		all_on = false;
+
+    ACPI_FUNCTION_TRACE((char *)(uintptr_t)__func__);
+    ACPI_SERIAL_ASSERT(powerres);
+
+    if (consumer == NULL)
+	return_ACPI_STATUS (AE_NOT_FOUND);
+
+    /* It is important we go from the hottest to the coldest state. */
+    for (
+	pc->ac_state = ACPI_STATE_D0;
+	pc->ac_state <= ACPI_STATE_D3 && !all_on;
+	pc->ac_state++
+    ) {
+	/* First, get the dependencies of this power state. */
+	reslist_name = reslist_names[pc->ac_state - ACPI_STATE_D0];
+	if (ACPI_FAILURE(AcpiGetHandle(consumer, reslist_name, &reslist_handle)))
+	    continue;
+
+	status = AcpiEvaluateObjectTyped(reslist_handle, NULL, NULL, &result,
+					 ACPI_TYPE_PACKAGE);
+	if (ACPI_FAILURE(status) || result.Pointer == NULL)
+	    continue;
+
+	object = (ACPI_OBJECT *)result.Pointer;
+	all_on = true;
+
+	for (size_t i = 0; i < object->Package.Count; i++) {
+	    dep = &object->Package.Elements[i];
+	    /* If failure, better to assume D-state is hotter than colder. */
+	    if (ACPI_FAILURE(acpi_GetInteger(dep->Reference.Handle, "_STA", &on)))
+		continue;
+	    if (on == 0) {
+		all_on = false;
+		break;
+	    }
+	}
+	/* XXX? AcpiOsFree(object); */
+    }
+
+    if (pc->ac_state == ACPI_STATE_D0)
+	pc->ac_state = ACPI_STATE_UNKNOWN;
+    else
+	pc->ac_state--;
+
+    return_ACPI_STATUS (AE_OK);
+}
+
+/*
+ * Get a power consumer's D-state.
+ */
+ACPI_STATUS
+acpi_pwr_get_consumer(ACPI_HANDLE consumer, int *state)
+{
+
+    struct acpi_powerconsumer	*pc;
+    ACPI_HANDLE			method_handle;
+    ACPI_STATUS			status;
+    ACPI_BUFFER			result;
+    ACPI_OBJECT			*object = NULL;
+
+    ACPI_FUNCTION_TRACE((char *)(uintptr_t)__func__);
+
+    if (consumer == NULL)
+	return_ACPI_STATUS (AE_NOT_FOUND);
+
+    ACPI_SERIAL_BEGIN(powerres);
+
+    if ((pc = acpi_pwr_find_consumer(consumer)) == NULL) {
+	if (ACPI_FAILURE(status = acpi_pwr_register_consumer(consumer)))
+	    goto out;
+	if ((pc = acpi_pwr_find_consumer(consumer)) == NULL)
+	    panic("acpi added power consumer but can't find it");
+    }
+
+    status = AcpiGetHandle(consumer, "_PSC", &method_handle);
+    if (ACPI_FAILURE(status)) {
+	ACPI_DEBUG_PRINT((ACPI_DB_OBJECTS, "no _PSC object - %s\n",
+			 AcpiFormatException(status)));
+	status = acpi_pwr_infer_state(consumer, pc);
+	if (ACPI_FAILURE(status)) {
+		ACPI_DEBUG_PRINT((ACPI_DB_OBJECTS, "couldn't infer D-state - %s\n",
+			 	 AcpiFormatException(status)));
+		pc->ac_state = ACPI_STATE_UNKNOWN;
+	}
+	goto out;
+    }
+
+    status = AcpiEvaluateObjectTyped(method_handle, NULL, NULL, &result, ACPI_TYPE_INTEGER);
+    if (ACPI_FAILURE(status) || result.Pointer == NULL) {
+	ACPI_DEBUG_PRINT((ACPI_DB_OBJECTS, "failed to get state with _PSC - %s\n",
+			 AcpiFormatException(status)));
+	pc->ac_state = ACPI_STATE_UNKNOWN;
+	goto out;
+    }
+
+    object = (ACPI_OBJECT *)result.Pointer;
+    pc->ac_state = ACPI_STATE_D0 + object->Integer.Value;
+
+out:
+    ACPI_SERIAL_END(powerres);
+    if (object != NULL)
+	AcpiOsFree(object);
+    *state = pc->ac_state;
+    return_ACPI_STATUS (AE_OK);
+}
+
+/*
+ * Set a power consumer to a particular D-state.
  */
 ACPI_STATUS
 acpi_pwr_switch_consumer(ACPI_HANDLE consumer, int state)
