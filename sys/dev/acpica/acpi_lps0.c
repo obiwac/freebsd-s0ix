@@ -82,12 +82,30 @@ struct acpi_lps0_private {
 	enum dsm_set	dsm_sets;
 };
 
+struct acpi_lps0_constraint {
+	bool		enabled;
+	char		*name;
+	int		min_d_state;
+	ACPI_HANDLE	handle;
+
+	/* Unused, spec-only. */
+	uint64_t	lpi_uid;
+	uint64_t	min_dev_specific_state;
+
+	/* Unused, AMD-only. */
+	uint64_t	function_states;
+};
+
 struct acpi_lps0_softc {
 	device_t 	dev;
 	ACPI_HANDLE 	handle;
 	ACPI_OBJECT	*obj;
 	enum dsm_set	dsm_sets;
 	struct uuid	*dsm_uuid;
+
+	bool				constraints_populated;
+	size_t				constraint_count;
+	struct acpi_lps0_constraint	*constraints;
 
 	/* sysctl stuff. */
 
@@ -170,6 +188,10 @@ acpi_lps0_attach(device_t dev)
 	if (sc->handle == NULL)
 		return (ENXIO);
 
+	sc->constraints_populated = false;
+	sc->constraint_count = 0;
+	sc->constraints = NULL;
+
 	acpi_sc = acpi_device_get_parent_softc(sc->dev);
 
 	/* Build sysctl tree. */
@@ -198,122 +220,170 @@ acpi_lps0_detach(device_t dev)
 	return (0);
 }
 
-static int
-parse_constraints_spec(ACPI_OBJECT *object)
+static void
+free_constraints(struct acpi_lps0_softc *sc)
 {
+	if (sc->constraints == NULL)
+		return;
 
-	return (-1); /* TODO Haven't tested this on Intel, but the parsing is to-spec I believe. */
-
-	for (size_t i = 0; i < object->Package.Count; i++) {
-		printf("Device constraint %zu\n", i);
-
-		ACPI_OBJECT *const constraint = &object->Package.Elements[i];
-		printf("%d\n", constraint->Package.Count);
-
-		ACPI_OBJECT *const device_name_obj = &constraint->Package.Elements[0];
-		char const *const device_name = device_name_obj->String.Pointer;
-		size_t const device_name_len = device_name_obj->String.Length;
-
-		printf("Device name: %.*s\n", (int)device_name_len, device_name);
-
-		uint32_t const device_enabled = constraint->Package.Elements[1].Integer.Value;
-		printf("Device enabled: %u\n", device_enabled);
-
-		ACPI_OBJECT *const device_constraint_detail = &constraint->Package.Elements[2];
-		/* The first element in the device constraint detail package is the revision, always zero. */
-		ACPI_OBJECT *const constraint_package = &device_constraint_detail->Package.Elements[1];
-
-		uint32_t const lpi_uid = constraint_package->Package.Elements[0].Integer.Value;
-		uint32_t const min_d_state = constraint_package->Package.Elements[1].Integer.Value;
-		uint32_t const min_dev_specific_state = constraint_package->Package.Elements[2].Integer.Value;
-
-		printf("LPI UID: %u\n", lpi_uid);
-		printf("Min D state precondition: %u\n", min_d_state);
-		printf("Min dev specific state precondition: %u\n", min_dev_specific_state);
+	for (size_t i = 0; i < sc->constraint_count; i++) {
+		if (sc->constraints[i].name != NULL)
+			free(sc->constraints[i].name, M_TEMP);
 	}
 
+	free(sc->constraints, M_TEMP);
+	sc->constraints = NULL;
+}
+
+static int
+get_constraints_spec(struct acpi_lps0_softc *sc, ACPI_OBJECT *object)
+{
+	struct acpi_lps0_constraint *constraint;
+	ACPI_OBJECT	*constraint_obj;
+	ACPI_OBJECT	*name_obj;
+	ACPI_OBJECT	*detail;
+	ACPI_OBJECT	*constraint_package;
+
+	/* TODO I haven't tested this yet, but I think it's to-spec. */
+
+	KASSERT(sc->constraints_populated == false,
+	    "constraints already populated");
+
+	sc->constraint_count = object->Package.Count;
+	sc->constraints = malloc(sc->constraint_count * sizeof *sc->constraints,
+	    M_TEMP, M_WAITOK);
+	if (sc->constraints == NULL)
+		return (ENOMEM);
+	bzero(sc->constraints, sc->constraint_count * sizeof *sc->constraints);
+
+	for (size_t i = 0; i < sc->constraint_count; i++) {
+		constraint_obj = &object->Package.Elements[i];
+		constraint = &sc->constraints[i];
+
+		constraint->enabled =
+		    constraint_obj->Package.Elements[1].Integer.Value;
+
+		name_obj = &constraint_obj->Package.Elements[0];
+		constraint->name = strdup(name_obj->String.Pointer, M_TEMP);
+		if (constraint->name == NULL) {
+			free_constraints(sc);
+			return (ENOMEM);
+		}
+
+		/*
+		 * The first element in the device constraint detail package is
+		 * the revision, always zero.
+		 */
+		detail = &constraint_obj->Package.Elements[2];
+		constraint_package = &detail->Package.Elements[1];
+
+		constraint->lpi_uid =
+		    constraint_package->Package.Elements[0].Integer.Value;
+		constraint->min_d_state =
+		    constraint_package->Package.Elements[1].Integer.Value;
+		constraint->min_dev_specific_state =
+		    constraint_package->Package.Elements[2].Integer.Value;
+	}
+
+	sc->constraints_populated = true;
 	return (0);
 }
 
 static int
-parse_constraints_amd(struct acpi_lps0_softc *sc, ACPI_OBJECT *object)
+get_constraints_amd(struct acpi_lps0_softc *sc, ACPI_OBJECT *object)
 {
-	ACPI_STATUS status;
+	size_t		constraint_count;
+	ACPI_OBJECT	*constraint_obj;
+	ACPI_OBJECT	*constraints;
+	struct acpi_lps0_constraint *constraint;
+	ACPI_OBJECT	*name_obj;
 
-	/* First element in the package is unknown. */
-	/* Second element is the number of device constraints. */
-	/* Third element is the list of device constraints itself. */
+	KASSERT(sc->constraints_populated == false,
+	    "constraints already populated");
 
-	size_t const device_constraint_count = object->Package.Elements[1].Integer.Value;
-	ACPI_OBJECT* const device_constraints = &object->Package.Elements[2];
-	char msg[256];
-	sprintf(msg, "device_contraints address: %p %p\n", &device_constraints->Package.Count, &device_constraint_count);
-	// kdb_enter(msg, msg);
+	/* 
+	 * First element in the package is unknown.
+	 * Second element is the number of device constraints.
+	 * Third element is the list of device constraints itself.
+	 */
+	constraint_count = object->Package.Elements[1].Integer.Value;
+	constraints = &object->Package.Elements[2];
 
-	(void) device_constraint_count;
-	KASSERT(device_constraints->Package.Count == device_constraint_count, "Device constraint count mismatch");
-
-	/* Should be able to use device_constraints->Package.Count here. */
-	for (size_t i = 0; i < device_constraint_count; i++) {
-		/* Parse the constraint package. */
-
-		ACPI_OBJECT* const constraint = &device_constraints->Package.Elements[i];
-		KASSERT(constraint->Package.Count == 4, "Device constraint package expected 4 elements");
-
-		uint64_t const enabled = constraint->Package.Elements[0].Integer.Value;
-		printf("Enabled: %lu\n", enabled);
-
-		ACPI_OBJECT *const device_name_obj = &constraint->Package.Elements[1];
-		char const *const device_name = device_name_obj->String.Pointer;
-		size_t const device_name_len = device_name_obj->String.Length;
-
-		printf("Device name: %.*s\n", (int)device_name_len, device_name);
-
-		uint64_t const function_states = constraint->Package.Elements[2].Integer.Value;
-		printf("Function states: %lu\n", function_states);
-
-		uint64_t const min_d_state = constraint->Package.Elements[3].Integer.Value;
-		printf("Min D state: %lu\n", min_d_state);
-
-		/* Get the handle. */
-
-		ACPI_HANDLE handle;
-		status = acpi_GetHandleInScope(sc->handle, __DECONST(char *, device_name), &handle);
-
-		if (ACPI_FAILURE(status))
-			continue;
-
-		int d_state;
-		if (ACPI_FAILURE(acpi_pwr_get_consumer(handle, &d_state)))
-			continue;
-
-		printf("Current D state: %d - requirements %s\n", d_state, d_state >= min_d_state ? "met" : "unmet");
+	if (constraints->Package.Count != constraint_count) {
+		device_printf(sc->dev, "constraint count mismatch (%d to %zu)\n",
+		    constraints->Package.Count, constraint_count);
+		return (ENXIO);
 	}
 
+	sc->constraint_count = constraint_count;
+	sc->constraints = malloc(constraint_count * sizeof *sc->constraints,
+	    M_TEMP, M_WAITOK);
+	if (sc->constraints == NULL)
+		return (ENOMEM);
+	bzero(sc->constraints, constraint_count * sizeof *sc->constraints);
+
+	for (size_t i = 0; i < constraint_count; i++) {
+		/* Parse the constraint package. */
+		constraint_obj = &constraints->Package.Elements[i];
+		if (constraint_obj->Package.Count != 4) {
+			device_printf(sc->dev, "constraint %zu has %d elements\n",
+			    i, constraint_obj->Package.Count);
+			free_constraints(sc);
+			return (ENXIO);
+		}
+
+		constraint = &sc->constraints[i];
+		constraint->enabled =
+		    constraint_obj->Package.Elements[0].Integer.Value;
+
+		name_obj = &constraint_obj->Package.Elements[1];
+		constraint->name = strdup(name_obj->String.Pointer, M_TEMP);
+		if (constraint->name == NULL) {
+			free_constraints(sc);
+			return (ENOMEM);
+		}
+
+		constraint->function_states =
+		    constraint_obj->Package.Elements[2].Integer.Value;
+		constraint->min_d_state =
+		    constraint_obj->Package.Elements[3].Integer.Value;
+
+		/*
+		int d_state;
+		if (ACPI_FAILURE(acpi_pwr_get_consumer(constraint->handle, &d_state)))
+			continue;
+		*/
+	}
+
+	sc->constraints_populated = true;
 	return (0);
 }
 
 static int
 acpi_lps0_get_device_constraints(device_t dev)
 {
-	struct acpi_lps0_softc *sc;
-	union dsm_index dsm_index;
-	ACPI_STATUS status;
-	ACPI_BUFFER result;
-	ACPI_OBJECT *object;
-	bool is_amd;
+	struct acpi_lps0_softc	*sc;
+	union dsm_index		dsm_index;
+	ACPI_STATUS		status;
+	ACPI_BUFFER		result;
+	ACPI_OBJECT		*object;
+	bool			is_amd;
+	int			rv;
+	struct acpi_lps0_constraint	*constraint;
 
 	sc = device_get_softc(dev);
-	is_amd = (sc->dsm_sets & DSM_SET_AMD) != 0; /* XXX Assumes anything else (only Intel and MS right now) is to spec. */
+	if (sc->constraints_populated)
+		return (0);
 
+	is_amd = (sc->dsm_sets & DSM_SET_AMD) != 0; /* XXX Assumes anything else (only Intel and MS right now) is to spec. */
 	if (is_amd)
 		dsm_index.amd = AMD_DSM_INDEX_GET_DEVICE_CONSTRAINTS;
 	else
 		dsm_index.regular = DSM_INDEX_GET_DEVICE_CONSTRAINTS;
 
+	/* XXX It seems like this DSM fails if called more than once. */
 	status = acpi_EvaluateDSMTyped(sc->handle, (uint8_t *)sc->dsm_uuid,
 	    LPS0_REV, dsm_index.i, NULL, &result, ACPI_TYPE_PACKAGE);
-
 	if (ACPI_FAILURE(status) || result.Pointer == NULL) {
 		device_printf(dev, "failed to call DSM %d (%s)\n", dsm_index.i,
 		    __func__);
@@ -321,14 +391,24 @@ acpi_lps0_get_device_constraints(device_t dev)
 	}
 
 	object = (ACPI_OBJECT *)result.Pointer;
-
 	if (is_amd)
-		parse_constraints_amd(sc, object);
+		rv = get_constraints_amd(sc, object);
 	else
-		parse_constraints_spec(object);
-
+		rv = get_constraints_spec(sc, object);
 	AcpiOsFree(object);
+	if (rv != 0)
+		return (rv);
 
+	/* Get handles for each constraint device. */
+	for (size_t i = 0; i < sc->constraint_count; i++) {
+		constraint = &sc->constraints[i];
+
+		status = acpi_GetHandleInScope(sc->handle,
+		    __DECONST(char *, constraint->name), &constraint->handle);
+		if (ACPI_FAILURE(status)) // TODO Should we full-on error here?
+			device_printf(dev, "failed to get handle for %s\n",
+			    constraint->name);
+	}
 	return (0);
 }
 
@@ -344,7 +424,7 @@ acpi_lps0_display_off(device_t dev)
 
 	sc = device_get_softc(dev);
 
-	// acpi_lps0_get_device_constraints(dev);
+	return acpi_lps0_get_device_constraints(dev);
 
 	if ((sc->dsm_sets & DSM_SET_INTEL) != 0 || (sc->dsm_sets & DSM_SET_MS) != 0)
 		dsm_index.regular = DSM_INDEX_DISPLAY_OFF_NOTIFICATION;
