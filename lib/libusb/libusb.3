@@ -220,6 +220,11 @@ Close a device handle.
 Get the device contained by devh.
 Returns NULL on error.
 .Pp
+.Ft libusb_device *
+.Fn libusb_get_parent "libusb_device *dev"
+Get dev's parent device.
+Returns NULL if the device has no parent (i.e. is a root device).
+.Pp
 .Ft int
 .Fn libusb_get_configuration "libusb_device_handle *devh" "int *config"
 Returns the value of the current configuration.

@@ -3,6 +3,7 @@
  *
  * Copyright (c) 2009 Sylvestre Gallon. All rights reserved.
  * Copyright (c) 2009-2023 Hans Petter Selasky
+ * Copyright (c) 2024 Aymeric Wibo
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
