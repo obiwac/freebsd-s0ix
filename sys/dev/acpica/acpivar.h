@@ -47,13 +47,22 @@
 #include <machine/bus.h>
 #include <machine/resource.h>
 
+enum sleep_type {
+	AWAKE		= ACPI_STATE_S0,
+	STANDBY		= ACPI_STATE_S1,
+	SUSPEND		= ACPI_STATE_S3,
+	HIBERNATE	= ACPI_STATE_S4,
+	POWEROFF	= ACPI_STATE_S5,
+	SUSPEND_TO_IDLE,
+};
+
 struct apm_clone_data;
 struct acpi_softc {
     device_t		acpi_dev;
     struct cdev		*acpi_dev_t;
 
     int			acpi_enabled;
-    int			acpi_sstate;
+    enum sleep_type	acpi_sstate;
     int			acpi_sleep_disabled;
 
     struct sysctl_ctx_list acpi_sysctl_ctx;
@@ -379,7 +388,7 @@ ACPI_STATUS	acpi_EvaluateOSC(ACPI_HANDLE handle, uint8_t *uuid,
 		    uint32_t *caps_out, bool query);
 ACPI_STATUS	acpi_OverrideInterruptLevel(UINT32 InterruptNumber);
 ACPI_STATUS	acpi_SetIntrModel(int model);
-int		acpi_ReqSleepState(struct acpi_softc *sc, int state);
+int		acpi_ReqSleepState(struct acpi_softc *sc, enum sleep_type stype);
 int		acpi_AckSleepState(struct apm_clone_data *clone, int error);
 ACPI_STATUS	acpi_SetSleepState(struct acpi_softc *sc, int state);
 int		acpi_wake_set_enable(device_t dev, int enable);
