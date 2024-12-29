@@ -106,6 +106,9 @@ struct acpi_lps0_softc {
 };
 
 static int acpi_lps0_sysctl_handler(SYSCTL_HANDLER_ARGS);
+static int acpi_lps0_get_device_constraints(device_t dev);
+static int acpi_lps0_enter(device_t dev);
+static int acpi_lps0_exit(device_t dev);
 
 static int
 rev_for_uuid(struct uuid *uuid)
@@ -375,6 +378,29 @@ get_constraints_amd(struct acpi_lps0_softc *sc, ACPI_OBJECT *object)
 	return (0);
 }
 
+static void
+run_dsm(device_t dev, struct uuid *uuid, int index)
+{
+	struct acpi_lps0_softc *sc;
+	ACPI_STATUS status;
+	ACPI_BUFFER result;
+
+	sc = device_get_softc(dev);
+
+	status = acpi_EvaluateDSMTyped(sc->handle, (uint8_t *)uuid,
+	    rev_for_uuid(uuid), index, NULL, &result, ACPI_TYPE_ANY);
+
+	/* XXX Spec says this should return nothing, but Linux checks for this return value. */
+	if (ACPI_FAILURE(status) || result.Pointer == NULL) {
+		device_printf(dev, "failed to call DSM %d (%s)\n", index,
+		    __func__);
+		return;
+	}
+
+	AcpiOsFree(result.Pointer);
+}
+
+__attribute__((unused)) // TODO Check device constraints before entering as a sanity-check. Also sysctl with this info would be nice.
 static int
 acpi_lps0_get_device_constraints(device_t dev)
 {
@@ -399,7 +425,8 @@ acpi_lps0_get_device_constraints(device_t dev)
 
 	/* XXX It seems like this DSM fails if called more than once. */
 	status = acpi_EvaluateDSMTyped(sc->handle, (uint8_t *)sc->dsm_uuid,
-	    LPS0_REV, dsm_index.i, NULL, &result, ACPI_TYPE_PACKAGE);
+	    rev_for_uuid(sc->dsm_uuid), dsm_index.i, NULL, &result,
+	    ACPI_TYPE_PACKAGE);
 	if (ACPI_FAILURE(status) || result.Pointer == NULL) {
 		device_printf(dev, "failed to call DSM %d (%s)\n", dsm_index.i,
 		    __func__);
@@ -430,90 +457,79 @@ acpi_lps0_get_device_constraints(device_t dev)
 
 #include <sys/kernel.h>
 
-static int
-acpi_lps0_display_off(device_t dev)
+static void
+acpi_lps0_display_off_notif(device_t dev)
 {
-	struct acpi_lps0_softc *sc;
-	union dsm_index dsm_index;
-	ACPI_STATUS status;
-	ACPI_BUFFER result;
+	struct acpi_lps0_softc *sc = device_get_softc(dev);
 
-	sc = device_get_softc(dev);
+	if (sc->dsm_sets & DSM_SET_INTEL)
+		run_dsm(dev, &intel_dsm_uuid, DSM_INDEX_DISPLAY_OFF_NOTIFICATION);
+	if (sc->dsm_sets & DSM_SET_MS)
+		run_dsm(dev, &ms_dsm_uuid, DSM_INDEX_DISPLAY_OFF_NOTIFICATION);
+	if (sc->dsm_sets & DSM_SET_AMD)
+		run_dsm(dev, &amd_dsm_uuid, AMD_DSM_INDEX_DISPLAY_OFF_NOTIFICATION);
+}
 
-	return acpi_lps0_get_device_constraints(dev);
+static void
+acpi_lps0_display_on_notif(device_t dev)
+{
+	struct acpi_lps0_softc *sc = device_get_softc(dev);
 
-	if ((sc->dsm_sets & DSM_SET_INTEL) != 0 || (sc->dsm_sets & DSM_SET_MS) != 0)
-		dsm_index.regular = DSM_INDEX_DISPLAY_OFF_NOTIFICATION;
-	else if ((sc->dsm_sets & DSM_SET_AMD) != 0)
-		dsm_index.amd = AMD_DSM_INDEX_DISPLAY_OFF_NOTIFICATION;
+	if (sc->dsm_sets & DSM_SET_INTEL)
+		run_dsm(dev, &intel_dsm_uuid, DSM_INDEX_DISPLAY_ON_NOTIFICATION);
+	if (sc->dsm_sets & DSM_SET_MS)
+		run_dsm(dev, &ms_dsm_uuid, DSM_INDEX_DISPLAY_ON_NOTIFICATION);
+	if (sc->dsm_sets & DSM_SET_AMD)
+		run_dsm(dev, &amd_dsm_uuid, AMD_DSM_INDEX_DISPLAY_ON_NOTIFICATION);
+}
 
-	ACPI_HANDLE handle;
-	printf("gethandleinscope %d\n", acpi_GetHandleInScope(sc->handle, "\\_SB.PCI0.GP17.VGA", &handle));
-	printf("switch %d\n", acpi_pwr_switch_consumer(handle, ACPI_STATE_D3));
+static void
+acpi_lps0_entry_notif(device_t dev)
+{
+	struct acpi_lps0_softc *sc = device_get_softc(dev);
 
-	status = acpi_EvaluateDSMTyped(sc->handle, (uint8_t *)sc->dsm_uuid,
-	    LPS0_REV, dsm_index.i, NULL, &result, ACPI_TYPE_ANY);
-
-	/* XXX Spec says this should return nothing, but Linux checks for this return value. */
-	if (ACPI_FAILURE(status) || result.Pointer == NULL) {
-		device_printf(dev, "failed to call DSM %d (%s)\n", dsm_index.i,
-		    __func__);
-		return (ENXIO);
+	if (sc->dsm_sets & DSM_SET_INTEL)
+		run_dsm(dev, &intel_dsm_uuid, DSM_INDEX_ENTRY_NOTIFICATION);
+	if (sc->dsm_sets & DSM_SET_MS) {
+		run_dsm(dev, &ms_dsm_uuid, DSM_INDEX_ENTRY_NOTIFICATION);
+		run_dsm(dev, &ms_dsm_uuid, DSM_INDEX_MODERN_ENTRY_NOTIFICATION);
 	}
-
-	device_printf(dev, "called DSM %d (%s) -> %p\n", dsm_index.i, __func__, result.Pointer);
-	AcpiOsFree(result.Pointer);
-
-	return (0);
+	if (sc->dsm_sets & DSM_SET_AMD)
+		run_dsm(dev, &amd_dsm_uuid, AMD_DSM_INDEX_ENTRY_NOTIFICATION);
 }
 
-static int
-acpi_lps0_display_on(device_t dev)
+static void
+acpi_lps0_exit_notif(device_t dev)
 {
-	struct acpi_lps0_softc *sc;
-	union dsm_index dsm_index;
-	ACPI_STATUS status;
-	ACPI_BUFFER result;
-	ACPI_OBJECT* object;
+	struct acpi_lps0_softc *sc = device_get_softc(dev);
 
-	sc = device_get_softc(dev);
-
-	if ((sc->dsm_sets & DSM_SET_INTEL) != 0 || (sc->dsm_sets & DSM_SET_MS) != 0)
-		dsm_index.regular = DSM_INDEX_DISPLAY_ON_NOTIFICATION;
-	else if ((sc->dsm_sets & DSM_SET_AMD) != 0)
-		dsm_index.amd = AMD_DSM_INDEX_DISPLAY_ON_NOTIFICATION;
-
-	status = acpi_EvaluateDSMTyped(sc->handle, (uint8_t *)sc->dsm_uuid,
-	    LPS0_REV, dsm_index.i, NULL, &result, ACPI_TYPE_ANY);
-
-	if (ACPI_FAILURE(status) || result.Pointer == NULL) {
-		device_printf(dev, "failed to call DSM %d (%s)\n", dsm_index.i,
-		    __func__);
-		return (ENXIO);
+	if (sc->dsm_sets & DSM_SET_INTEL)
+		run_dsm(dev, &intel_dsm_uuid, DSM_INDEX_EXIT_NOTIFICATION);
+	if (sc->dsm_sets & DSM_SET_MS) {
+		run_dsm(dev, &ms_dsm_uuid, DSM_INDEX_EXIT_NOTIFICATION);
+		run_dsm(dev, &ms_dsm_uuid, DSM_INDEX_MODERN_EXIT_NOTIFICATION);
 	}
+	if (sc->dsm_sets & DSM_SET_AMD)
+		run_dsm(dev, &amd_dsm_uuid, AMD_DSM_INDEX_EXIT_NOTIFICATION);
+}
 
-	object = (ACPI_OBJECT *)result.Pointer;
-	device_printf(dev, "called DSM %d (%s) -> %lu\n", dsm_index.i, __func__, object->Integer.Value);
-	AcpiOsFree(object);
+static int
+acpi_lps0_enter(device_t dev)
+{
+
+	acpi_lps0_display_off_notif(dev);
+	acpi_lps0_entry_notif(dev);
 
 	return (0);
 }
 
-__attribute__((unused))
 static int
-acpi_lps0_post_suspend(device_t dev)
+acpi_lps0_exit(device_t dev)
 {
 
-	printf("TODO %s\n", __func__);
-	return (0);
-}
+	acpi_lps0_exit_notif(dev);
+	acpi_lps0_display_on_notif(dev);
 
-__attribute__((unused))
-static int
-acpi_lps0_post_resume(device_t dev)
-{
-
-	printf("TODO %s\n", __func__);
 	return (0);
 }
 
@@ -534,11 +550,11 @@ acpi_lps0_sysctl_handler(SYSCTL_HANDLER_ARGS)
 			break;
 
 		if (display_on) {
-			rv = acpi_lps0_display_on(sc->dev);
+			acpi_lps0_display_on_notif(sc->dev);
 			break;
 		}
 
-		rv = acpi_lps0_display_off(sc->dev);
+		acpi_lps0_display_off_notif(sc->dev);
 		break;
 	}
 
@@ -547,15 +563,9 @@ acpi_lps0_sysctl_handler(SYSCTL_HANDLER_ARGS)
 }
 
 static device_method_t acpi_lps0_methods[] = {
-	/* Device interface */
 	DEVMETHOD(device_probe,		acpi_lps0_probe),
 	DEVMETHOD(device_attach,	acpi_lps0_attach),
 	DEVMETHOD(device_detach,	acpi_lps0_detach),
-
-	// TODO device_post_suspend & device_post_resume (don't forget to remove the __attribute__((unused))'s once this is done).
-	// DEVMETHOD(device_post_suspend,	acpi_lps0_post_suspend),
-	// DEVMETHOD(device_post_resume,	acpi_lps0_post_resume),
-
 	DEVMETHOD_END
 };
 
