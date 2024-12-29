@@ -66,10 +66,6 @@ union dsm_index {
 	enum amd_dsm_index	amd;
 };
 
-enum lps0_sysctl {
-	LPS0_SYSCTL_DISPLAY_ON,
-};
-
 struct acpi_lps0_private {
 	enum dsm_set	dsm_sets;
 };
@@ -98,14 +94,8 @@ struct acpi_lps0_softc {
 	bool				constraints_populated;
 	size_t				constraint_count;
 	struct acpi_lps0_constraint	*constraints;
-
-	/* sysctl stuff. */
-
-	struct sysctl_ctx_list	sysctl_ctx;
-	struct sysctl_oid	*sysctl_tree;
 };
 
-static int acpi_lps0_sysctl_handler(SYSCTL_HANDLER_ARGS);
 static int acpi_lps0_get_device_constraints(device_t dev);
 static int acpi_lps0_enter(device_t dev);
 static int acpi_lps0_exit(device_t dev);
@@ -208,18 +198,6 @@ acpi_lps0_attach(device_t dev)
 
 	acpi_sc = acpi_device_get_parent_softc(sc->dev);
 
-	/* Build sysctl tree. */
-
-	sysctl_ctx_init(&sc->sysctl_ctx);
-	sc->sysctl_tree = SYSCTL_ADD_NODE(&sc->sysctl_ctx,
-	    SYSCTL_CHILDREN(acpi_sc->acpi_sysctl_tree),
-	    OID_AUTO, "lps0", CTLFLAG_RD, NULL, "Low Power S0 Idle");
-
-	SYSCTL_ADD_PROC(&sc->sysctl_ctx, SYSCTL_CHILDREN(sc->sysctl_tree),
-	    OID_AUTO, "display_on", CTLTYPE_INT | CTLFLAG_WR | CTLFLAG_ANYBODY,
-	    sc, LPS0_SYSCTL_DISPLAY_ON, acpi_lps0_sysctl_handler, "I",
-	    "Turn the display on or off");
-
 	/* Set the callbacks for when entering/exiting sleep. */
 	acpi_sc->acpi_spmc_device = dev;
 	acpi_sc->acpi_spmc_enter = acpi_lps0_enter;
@@ -231,10 +209,6 @@ acpi_lps0_attach(device_t dev)
 static int
 acpi_lps0_detach(device_t dev)
 {
-	struct acpi_lps0_softc *sc;
-
-	sc = device_get_softc(dev);
-	sysctl_ctx_free(&sc->sysctl_ctx);
 
 	return (0);
 }
@@ -531,35 +505,6 @@ acpi_lps0_exit(device_t dev)
 	acpi_lps0_display_on_notif(dev);
 
 	return (0);
-}
-
-static int
-acpi_lps0_sysctl_handler(SYSCTL_HANDLER_ARGS)
-{
-	struct acpi_lps0_softc	*sc = oidp->oid_arg1;
-	int			sysctl = oidp->oid_arg2;
-	int			rv = -1;
-	int			display_on;
-
-	ACPI_SERIAL_BEGIN(lps0);
-
-	switch (sysctl) {
-	case LPS0_SYSCTL_DISPLAY_ON:
-		rv = sysctl_handle_int(oidp, &display_on, 0, req);
-		if (rv != 0 || req->newptr == NULL)
-			break;
-
-		if (display_on) {
-			acpi_lps0_display_on_notif(sc->dev);
-			break;
-		}
-
-		acpi_lps0_display_off_notif(sc->dev);
-		break;
-	}
-
-	ACPI_SERIAL_END(lps0);
-	return (rv);
 }
 
 static device_method_t acpi_lps0_methods[] = {
