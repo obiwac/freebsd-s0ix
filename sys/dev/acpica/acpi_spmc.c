@@ -11,9 +11,11 @@
 
 #include <dev/acpica/acpivar.h>
 
-ACPI_SERIAL_DECL(lps0, "Low Power S0 Idle");
+/* Hooks for the ACPI CA debugging infrastructure */
+#define _COMPONENT	ACPI_SPMC
+ACPI_MODULE_NAME("SPMC")
 
-static char *lps0_ids[] = {
+static char *spmc_ids[] = {
 	"PNP0D80",
 	NULL
 };
@@ -47,6 +49,7 @@ enum intel_dsm_index {
 	DSM_INDEX_DISPLAY_ON_NOTIFICATION	= 4,
 	DSM_INDEX_ENTRY_NOTIFICATION		= 5,
 	DSM_INDEX_EXIT_NOTIFICATION		= 6,
+	/* Only for Microsoft DSM set. */
 	DSM_INDEX_MODERN_ENTRY_NOTIFICATION	= 7,
 	DSM_INDEX_MODERN_EXIT_NOTIFICATION	= 8,
 };
@@ -66,25 +69,25 @@ union dsm_index {
 	enum amd_dsm_index	amd;
 };
 
-struct acpi_lps0_private {
+struct acpi_spmc_private {
 	enum dsm_set	dsm_sets;
 };
 
-struct acpi_lps0_constraint {
+struct acpi_spmc_constraint {
 	bool		enabled;
 	char		*name;
 	int		min_d_state;
 	ACPI_HANDLE	handle;
 
-	/* Unused, spec-only. */
+	/* Unused, spec only. */
 	uint64_t	lpi_uid;
 	uint64_t	min_dev_specific_state;
 
-	/* Unused, AMD-only. */
+	/* Unused, AMD only. */
 	uint64_t	function_states;
 };
 
-struct acpi_lps0_softc {
+struct acpi_spmc_softc {
 	device_t 	dev;
 	ACPI_HANDLE 	handle;
 	ACPI_OBJECT	*obj;
@@ -93,12 +96,12 @@ struct acpi_lps0_softc {
 
 	bool				constraints_populated;
 	size_t				constraint_count;
-	struct acpi_lps0_constraint	*constraints;
+	struct acpi_spmc_constraint	*constraints;
 };
 
-static int acpi_lps0_get_device_constraints(device_t dev);
-static int acpi_lps0_enter(device_t dev);
-static int acpi_lps0_exit(device_t dev);
+static int acpi_spmc_get_device_constraints(device_t dev);
+static int acpi_spmc_enter(device_t dev);
+static int acpi_spmc_exit(device_t dev);
 
 static int
 rev_for_uuid(struct uuid *uuid)
@@ -120,17 +123,17 @@ rev_for_uuid(struct uuid *uuid)
 }
 
 static int
-acpi_lps0_probe(device_t dev)
+acpi_spmc_probe(device_t dev)
 {
 	char *name;
 	ACPI_HANDLE handle;
-	struct acpi_lps0_private *private;
+	struct acpi_spmc_private *private;
 
 	/* Check that this is an enabled device. */
-	if (acpi_get_type(dev) != ACPI_TYPE_DEVICE || acpi_disabled("lps0"))
+	if (acpi_get_type(dev) != ACPI_TYPE_DEVICE || acpi_disabled("spmc"))
 		return (ENXIO);
 
-	if (ACPI_ID_PROBE(device_get_parent(dev), dev, lps0_ids, &name) > 0)
+	if (ACPI_ID_PROBE(device_get_parent(dev), dev, spmc_ids, &name) > 0)
 		return (ENXIO);
 
 	handle = acpi_get_handle(dev);
@@ -167,10 +170,10 @@ acpi_lps0_probe(device_t dev)
 }
 
 static int
-acpi_lps0_attach(device_t dev)
+acpi_spmc_attach(device_t dev)
 {
-	struct acpi_lps0_private *private;
-	struct acpi_lps0_softc *sc;
+	struct acpi_spmc_private *private;
+	struct acpi_spmc_softc *sc;
 	struct acpi_softc *acpi_sc;
 
 	sc = device_get_softc(dev);
@@ -200,21 +203,21 @@ acpi_lps0_attach(device_t dev)
 
 	/* Set the callbacks for when entering/exiting sleep. */
 	acpi_sc->acpi_spmc_device = dev;
-	acpi_sc->acpi_spmc_enter = acpi_lps0_enter;
-	acpi_sc->acpi_spmc_exit = acpi_lps0_exit;
+	acpi_sc->acpi_spmc_enter = acpi_spmc_enter;
+	acpi_sc->acpi_spmc_exit = acpi_spmc_exit;
 
 	return (0);
 }
 
 static int
-acpi_lps0_detach(device_t dev)
+acpi_spmc_detach(device_t dev)
 {
 
 	return (0);
 }
 
 static void
-free_constraints(struct acpi_lps0_softc *sc)
+free_constraints(struct acpi_spmc_softc *sc)
 {
 	if (sc->constraints == NULL)
 		return;
@@ -229,9 +232,9 @@ free_constraints(struct acpi_lps0_softc *sc)
 }
 
 static int
-get_constraints_spec(struct acpi_lps0_softc *sc, ACPI_OBJECT *object)
+get_constraints_spec(struct acpi_spmc_softc *sc, ACPI_OBJECT *object)
 {
-	struct acpi_lps0_constraint *constraint;
+	struct acpi_spmc_constraint *constraint;
 	ACPI_OBJECT	*constraint_obj;
 	ACPI_OBJECT	*name_obj;
 	ACPI_OBJECT	*detail;
@@ -283,12 +286,12 @@ get_constraints_spec(struct acpi_lps0_softc *sc, ACPI_OBJECT *object)
 }
 
 static int
-get_constraints_amd(struct acpi_lps0_softc *sc, ACPI_OBJECT *object)
+get_constraints_amd(struct acpi_spmc_softc *sc, ACPI_OBJECT *object)
 {
 	size_t		constraint_count;
 	ACPI_OBJECT	*constraint_obj;
 	ACPI_OBJECT	*constraints;
-	struct acpi_lps0_constraint *constraint;
+	struct acpi_spmc_constraint *constraint;
 	ACPI_OBJECT	*name_obj;
 
 	KASSERT(sc->constraints_populated == false,
@@ -355,7 +358,7 @@ get_constraints_amd(struct acpi_lps0_softc *sc, ACPI_OBJECT *object)
 static void
 run_dsm(device_t dev, struct uuid *uuid, int index)
 {
-	struct acpi_lps0_softc *sc;
+	struct acpi_spmc_softc *sc;
 	ACPI_STATUS status;
 	ACPI_BUFFER result;
 
@@ -376,16 +379,16 @@ run_dsm(device_t dev, struct uuid *uuid, int index)
 
 __attribute__((unused)) // TODO Check device constraints before entering as a sanity-check. Also sysctl with this info would be nice.
 static int
-acpi_lps0_get_device_constraints(device_t dev)
+acpi_spmc_get_device_constraints(device_t dev)
 {
-	struct acpi_lps0_softc	*sc;
+	struct acpi_spmc_softc	*sc;
 	union dsm_index		dsm_index;
 	ACPI_STATUS		status;
 	ACPI_BUFFER		result;
 	ACPI_OBJECT		*object;
 	bool			is_amd;
 	int			rv;
-	struct acpi_lps0_constraint	*constraint;
+	struct acpi_spmc_constraint	*constraint;
 
 	sc = device_get_softc(dev);
 	if (sc->constraints_populated)
@@ -432,9 +435,9 @@ acpi_lps0_get_device_constraints(device_t dev)
 #include <sys/kernel.h>
 
 static void
-acpi_lps0_display_off_notif(device_t dev)
+acpi_spmc_display_off_notif(device_t dev)
 {
-	struct acpi_lps0_softc *sc = device_get_softc(dev);
+	struct acpi_spmc_softc *sc = device_get_softc(dev);
 
 	if (sc->dsm_sets & DSM_SET_INTEL)
 		run_dsm(dev, &intel_dsm_uuid, DSM_INDEX_DISPLAY_OFF_NOTIFICATION);
@@ -445,9 +448,9 @@ acpi_lps0_display_off_notif(device_t dev)
 }
 
 static void
-acpi_lps0_display_on_notif(device_t dev)
+acpi_spmc_display_on_notif(device_t dev)
 {
-	struct acpi_lps0_softc *sc = device_get_softc(dev);
+	struct acpi_spmc_softc *sc = device_get_softc(dev);
 
 	if (sc->dsm_sets & DSM_SET_INTEL)
 		run_dsm(dev, &intel_dsm_uuid, DSM_INDEX_DISPLAY_ON_NOTIFICATION);
@@ -458,9 +461,9 @@ acpi_lps0_display_on_notif(device_t dev)
 }
 
 static void
-acpi_lps0_entry_notif(device_t dev)
+acpi_spmc_entry_notif(device_t dev)
 {
-	struct acpi_lps0_softc *sc = device_get_softc(dev);
+	struct acpi_spmc_softc *sc = device_get_softc(dev);
 
 	if (sc->dsm_sets & DSM_SET_INTEL)
 		run_dsm(dev, &intel_dsm_uuid, DSM_INDEX_ENTRY_NOTIFICATION);
@@ -473,9 +476,9 @@ acpi_lps0_entry_notif(device_t dev)
 }
 
 static void
-acpi_lps0_exit_notif(device_t dev)
+acpi_spmc_exit_notif(device_t dev)
 {
-	struct acpi_lps0_softc *sc = device_get_softc(dev);
+	struct acpi_spmc_softc *sc = device_get_softc(dev);
 
 	if (sc->dsm_sets & DSM_SET_INTEL)
 		run_dsm(dev, &intel_dsm_uuid, DSM_INDEX_EXIT_NOTIFICATION);
@@ -488,37 +491,37 @@ acpi_lps0_exit_notif(device_t dev)
 }
 
 static int
-acpi_lps0_enter(device_t dev)
+acpi_spmc_enter(device_t dev)
 {
 
-	acpi_lps0_display_off_notif(dev);
-	acpi_lps0_entry_notif(dev);
+	acpi_spmc_display_off_notif(dev);
+	acpi_spmc_entry_notif(dev);
 
 	return (0);
 }
 
 static int
-acpi_lps0_exit(device_t dev)
+acpi_spmc_exit(device_t dev)
 {
 
-	acpi_lps0_exit_notif(dev);
-	acpi_lps0_display_on_notif(dev);
+	acpi_spmc_exit_notif(dev);
+	acpi_spmc_display_on_notif(dev);
 
 	return (0);
 }
 
-static device_method_t acpi_lps0_methods[] = {
-	DEVMETHOD(device_probe,		acpi_lps0_probe),
-	DEVMETHOD(device_attach,	acpi_lps0_attach),
-	DEVMETHOD(device_detach,	acpi_lps0_detach),
+static device_method_t acpi_spmc_methods[] = {
+	DEVMETHOD(device_probe,		acpi_spmc_probe),
+	DEVMETHOD(device_attach,	acpi_spmc_attach),
+	DEVMETHOD(device_detach,	acpi_spmc_detach),
 	DEVMETHOD_END
 };
 
-static driver_t acpi_lps0_driver = {
-	"acpi_lps0",
-	acpi_lps0_methods,
-	sizeof(struct acpi_lps0_softc),
+static driver_t acpi_spmc_driver = {
+	"acpi_spmc",
+	acpi_spmc_methods,
+	sizeof(struct acpi_spmc_softc),
 };
 
-DRIVER_MODULE_ORDERED(acpi_lps0, acpi, acpi_lps0_driver, NULL, NULL, SI_ORDER_ANY);
-MODULE_DEPEND(acpi_lps0, acpi, 1, 1, 1);
+DRIVER_MODULE_ORDERED(acpi_spmc, acpi, acpi_spmc_driver, NULL, NULL, SI_ORDER_ANY);
+MODULE_DEPEND(acpi_spmc, acpi, 1, 1, 1);
