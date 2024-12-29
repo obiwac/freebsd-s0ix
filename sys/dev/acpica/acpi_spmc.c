@@ -1,3 +1,12 @@
+/*
+ * SPDX-License-Identifier: BSD-2-Clause
+ *
+ * Copyright (c) 2024 The FreeBSD Foundation
+ *
+ * This software was developed by Aymeric Wibo <obiwac@freebsd.org>
+ * under sponsorship from the FreeBSD Foundation.
+ */
+
 #include <sys/param.h>
 #include <sys/kernel.h>
 #include <sys/module.h>
