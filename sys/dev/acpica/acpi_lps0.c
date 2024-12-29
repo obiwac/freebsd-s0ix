@@ -13,11 +13,6 @@
 
 ACPI_SERIAL_DECL(lps0, "Low Power S0 Idle");
 
-/*
- * TODO How many AMD devices still have BIOS' without the DSM's for modern standby?
- * If it's not too much, it might be worth just focusing on the modern standby DSM's.
- */
-
 static char *lps0_ids[] = {
 	"PNP0D80",
 	NULL
@@ -39,9 +34,9 @@ static struct uuid amd_dsm_uuid = { /* e3f32452-febc-43ce-9039-932122d37721 */
 };
 
 enum dsm_set {
-	DSM_SET_INTEL		= 0b001,
-	DSM_SET_MS		= 0b010,
-	DSM_SET_AMD		= 0b100,
+	DSM_SET_INTEL	= 1 << 0,
+	DSM_SET_MS	= 1 << 1,
+	DSM_SET_AMD	= 1 << 2,
 };
 
 enum intel_dsm_index {
@@ -74,9 +69,6 @@ union dsm_index {
 enum lps0_sysctl {
 	LPS0_SYSCTL_DISPLAY_ON,
 };
-
-/* Published specs only have rev 0, but Linux uses rev 1. */
-#define LPS0_REV	1
 
 struct acpi_lps0_private {
 	enum dsm_set	dsm_sets;
@@ -116,6 +108,25 @@ struct acpi_lps0_softc {
 static int acpi_lps0_sysctl_handler(SYSCTL_HANDLER_ARGS);
 
 static int
+rev_for_uuid(struct uuid *uuid)
+{
+
+	/*
+	 * Published specs only mention rev 0, but Linux uses rev 1 for Intel.
+	 * Microsoft must necessarily be rev 0, however, as enum functions
+	 * returns 0 as the function index bitfield otherwise.
+	 */
+	if (uuid == &intel_dsm_uuid)
+		return 1;
+	if (uuid == &ms_dsm_uuid)
+		return 0;
+	if (uuid == &amd_dsm_uuid)
+		return 0;
+	KASSERT(false, "unsupported DSM UUID");
+	return (0);
+}
+
+static int
 acpi_lps0_probe(device_t dev)
 {
 	char *name;
@@ -136,12 +147,12 @@ acpi_lps0_probe(device_t dev)
 	/* Check which sets of DSM's are supported. */
 	enum dsm_set dsm_sets = 0;
 
-	uint64_t const dsm_bits = acpi_DSMQuery(handle, (uint8_t *)&intel_dsm_uuid,
-	    LPS0_REV);
-	uint64_t const ms_dsm_bits = acpi_DSMQuery(handle, (uint8_t *)&ms_dsm_uuid,
-	    LPS0_REV);
-	uint64_t const amd_dsm_bits = acpi_DSMQuery(handle, (uint8_t *)&amd_dsm_uuid,
-	    LPS0_REV);
+	uint64_t const dsm_bits = acpi_DSMQuery(handle,
+	    (uint8_t *)&intel_dsm_uuid, rev_for_uuid(&intel_dsm_uuid));
+	uint64_t const ms_dsm_bits = acpi_DSMQuery(handle,
+	    (uint8_t *)&ms_dsm_uuid, rev_for_uuid(&ms_dsm_uuid));
+	uint64_t const amd_dsm_bits = acpi_DSMQuery(handle,
+	    (uint8_t *)&amd_dsm_uuid, rev_for_uuid(&amd_dsm_uuid));
 
 	if ((dsm_bits & 1) != 0)
 		dsm_sets |= DSM_SET_INTEL;
