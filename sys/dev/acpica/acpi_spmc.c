@@ -432,8 +432,6 @@ acpi_spmc_get_device_constraints(device_t dev)
 	return (0);
 }
 
-#include <sys/kernel.h>
-
 static void
 acpi_spmc_display_off_notif(device_t dev)
 {
