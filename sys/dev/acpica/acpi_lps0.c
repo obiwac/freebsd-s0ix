@@ -217,6 +217,11 @@ acpi_lps0_attach(device_t dev)
 	    sc, LPS0_SYSCTL_DISPLAY_ON, acpi_lps0_sysctl_handler, "I",
 	    "Turn the display on or off");
 
+	/* Set the callbacks for when entering/exiting sleep. */
+	acpi_sc->acpi_spmc_device = dev;
+	acpi_sc->acpi_spmc_enter = acpi_lps0_enter;
+	acpi_sc->acpi_spmc_exit = acpi_lps0_exit;
+
 	return (0);
 }
 
