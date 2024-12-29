@@ -80,6 +80,10 @@ struct acpi_softc {
     int			acpi_verbose;
     int			acpi_handle_reboot;
 
+    device_t		acpi_spmc_device;
+    int			(*acpi_spmc_enter)(device_t);
+    int			(*acpi_spmc_exit)(device_t);
+
     vm_offset_t		acpi_wakeaddr;
     vm_paddr_t		acpi_wakephys;
 
