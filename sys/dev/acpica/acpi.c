@@ -3106,10 +3106,12 @@ acpi_ReqSleepState(struct acpi_softc *sc, enum sleep_type stype)
     struct apm_clone_data *clone;
     ACPI_STATUS status;
 
+	/*
     if (stype < ACPI_STATE_S1 || stype > ACPI_S_STATES_MAX)
 	return (EINVAL);
     if (!acpi_sleep_states[stype])
 	return (EOPNOTSUPP);
+	*/
 
     /*
      * If a reboot/shutdown/suspend request is already in progress or
@@ -3271,11 +3273,12 @@ acpi_sleep_disable(struct acpi_softc *sc)
 }
 
 enum acpi_sleep_state {
-    ACPI_SS_NONE,
-    ACPI_SS_GPE_SET,
-    ACPI_SS_DEV_SUSPEND,
-    ACPI_SS_SLP_PREP,
-    ACPI_SS_SLEPT,
+    ACPI_SS_NONE	= 0,
+    ACPI_SS_GPE_SET	= 1 << 0,
+    ACPI_SS_DEV_SUSPEND	= 1 << 1,
+    ACPI_SS_SPMC_ENTER	= 1 << 2,
+    ACPI_SS_SLP_PREP	= 1 << 3,
+    ACPI_SS_SLEPT	= 1 << 4,
 };
 
 static void
@@ -3292,7 +3295,7 @@ do_standby(struct acpi_softc *sc, enum acpi_sleep_state *slp_state,
 	    AcpiFormatException(status));
 	return;
     }
-    *slp_state = ACPI_SS_SLEPT;
+    *slp_state |= ACPI_SS_SLEPT;
 }
 
 static void
@@ -3355,19 +3358,32 @@ do_sleep(struct acpi_softc *sc, enum acpi_sleep_state *slp_state,
     /* Re-enable ACPI hardware on wakeup from sleep state 4. */
     if (state == ACPI_STATE_S4)
 	AcpiEnable();
-    *slp_state = ACPI_SS_SLEPT;
+    *slp_state |= ACPI_SS_SLEPT;
 }
+
+// TODO Move these elsewhere.
+#include <machine/intr_machdep.h>
+#include <machine/specialreg.h>
 
 static void
 do_idle(struct acpi_softc *sc, enum acpi_sleep_state *slp_state,
     register_t intr)
 {
-    // TODO There's probably a bit more to this than this.
 
-    cpu_idle(0);
+    intr_suspend();
 
+    // TODO Explain what we're doing here.
+    intr_enable_src(AcpiGbl_FADT.SciInterrupt);
+
+    // TODO Make this better.
+    if (sc->acpi_spmc_device != NULL)
+	cpu_mwait(MWAIT_INTRBREAK, MWAIT_C0);
+    else
+	cpu_idle(0);
+
+    intr_resume(false);
     intr_restore(intr);
-    *slp_state = ACPI_SS_SLEPT;
+    *slp_state |= ACPI_SS_SLEPT;
 }
 
 /*
@@ -3384,6 +3400,7 @@ acpi_EnterSleepState(struct acpi_softc *sc, enum sleep_type stype)
 
     ACPI_FUNCTION_TRACE_U32((char *)(uintptr_t)__func__, state);
 
+	/*
     if (stype < ACPI_STATE_S1 || stype > ACPI_S_STATES_MAX)
 	return_ACPI_STATUS (AE_BAD_PARAMETER);
     if (!acpi_sleep_states[stype]) {
@@ -3391,6 +3408,7 @@ acpi_EnterSleepState(struct acpi_softc *sc, enum sleep_type stype)
 	    stype);
 	return (AE_SUPPORT);
     }
+    */
 
     /* Re-entry once we're suspending is not allowed. */
     status = acpi_sleep_disable(sc);
@@ -3429,6 +3447,7 @@ acpi_EnterSleepState(struct acpi_softc *sc, enum sleep_type stype)
 
     /*
      * Be sure to hold Giant across DEVICE_SUSPEND/RESUME
+     * TODO Fix this comment.
      */
     bus_topo_lock();
 
@@ -3438,7 +3457,7 @@ acpi_EnterSleepState(struct acpi_softc *sc, enum sleep_type stype)
 
     /* Enable any GPEs as appropriate and requested by the user. */
     acpi_wake_prep_walk(stype);
-    slp_state = ACPI_SS_GPE_SET;
+    slp_state |= ACPI_SS_GPE_SET;
 
     /*
      * Inform all devices that we are going to sleep.  If at least one
@@ -3449,10 +3468,19 @@ acpi_EnterSleepState(struct acpi_softc *sc, enum sleep_type stype)
      * bus interface does not provide for this.
      */
     if (DEVICE_SUSPEND(root_bus) != 0) {
-	device_printf(sc->acpi_dev, "device_suspend failed\n");
-	goto backout;
+        device_printf(sc->acpi_dev, "device_suspend failed\n");
+        goto backout;
     }
-    slp_state = ACPI_SS_DEV_SUSPEND;
+    slp_state |= ACPI_SS_DEV_SUSPEND;
+    AcpiOsSleep(1000);
+
+    if (sc->acpi_spmc_device != NULL) {
+	MPASS(sc->acpi_spmc_enter != NULL);
+	if (sc->acpi_spmc_enter(sc->acpi_spmc_device) != 0)
+	    device_printf(sc->acpi_dev, "failed to run SPMC entry\n");
+	else
+	    slp_state |= ACPI_SS_SPMC_ENTER;
+    }
 
     if (stype != SUSPEND_TO_IDLE) {
 	status = AcpiEnterSleepStatePrep(stype);
@@ -3462,7 +3490,7 @@ acpi_EnterSleepState(struct acpi_softc *sc, enum sleep_type stype)
 	    goto backout;
 	}
     }
-    slp_state = ACPI_SS_SLP_PREP;
+    slp_state |= ACPI_SS_SLP_PREP;
 
     if (sc->acpi_sleep_delay > 0)
 	DELAY(sc->acpi_sleep_delay * 1000000);
@@ -3493,25 +3521,42 @@ acpi_EnterSleepState(struct acpi_softc *sc, enum sleep_type stype)
      * process.  This handles both the error and success cases.
      */
 backout:
-    if (slp_state >= ACPI_SS_SLP_PREP)
+    if (slp_state & ACPI_SS_SLP_PREP) {
 	resumeclock();
-    if (slp_state >= ACPI_SS_GPE_SET) {
+	slp_state &= ~ACPI_SS_SLP_PREP;
+    }
+    if (slp_state & ACPI_SS_GPE_SET) {
 	acpi_wake_prep_walk(stype);
 	sc->acpi_sstate = ACPI_STATE_S0;
+	slp_state &= ~ACPI_SS_GPE_SET;
     }
-    if (slp_state >= ACPI_SS_DEV_SUSPEND)
+    if (slp_state & ACPI_SS_SPMC_ENTER) {
+	MPASS(sc->acpi_spmc_device != NULL);
+	MPASS(sc->acpi_spmc_exit != NULL);
+	if (sc->acpi_spmc_exit(sc->acpi_spmc_device) != 0)
+	    device_printf(sc->acpi_dev, "failed to run SPMC exit\n");
+	slp_state &= ~ACPI_SS_SPMC_ENTER;
+    }
+    if (slp_state & ACPI_SS_DEV_SUSPEND) {
 	DEVICE_RESUME(root_bus);
-    if (slp_state >= ACPI_SS_SLP_PREP)
+	slp_state &= ~ACPI_SS_DEV_SUSPEND;
+    }
+    if (stype != SUSPEND_TO_IDLE && slp_state & ACPI_SS_SLP_PREP) {
 	AcpiLeaveSleepState(stype);
-    if (slp_state >= ACPI_SS_SLEPT) {
+	slp_state &= ~ACPI_SS_SLP_PREP;
+    }
+    if (slp_state & ACPI_SS_SLEPT) {
 #if defined(__i386__) || defined(__amd64__)
 	/* NB: we are still using ACPI timecounter at this point. */
 	resume_TSC();
 #endif
 	acpi_resync_clock(sc);
 	acpi_enable_fixed_events(sc);
+	slp_state &= ~ACPI_SS_SLEPT;
     }
     sc->acpi_next_sstate = 0;
+
+    MPASS(slp_state == ACPI_SS_NONE);
 
     bus_topo_unlock();
 
@@ -3676,6 +3721,9 @@ static int
 acpi_wake_prep_walk(int sstate)
 {
     ACPI_HANDLE sb_handle;
+
+    if (sstate == SUSPEND_TO_IDLE)
+	sstate = SUSPEND;
 
     if (ACPI_SUCCESS(AcpiGetHandle(ACPI_ROOT_OBJECT, "\\_SB_", &sb_handle)))
 	AcpiWalkNamespace(ACPI_TYPE_DEVICE, sb_handle, 100,
@@ -4224,6 +4272,9 @@ acpi_supported_sleep_state_sysctl(SYSCTL_HANDLER_ARGS)
     for (state = ACPI_STATE_S1; state < ACPI_S_STATE_COUNT; state++)
 	if (acpi_sleep_states[state])
 	    sbuf_printf(&sb, "%s ", acpi_sstate2sname(state));
+#if defined(__i386__) || defined(__amd64__)
+    sbuf_printf(&sb, "S2IDLE ");
+#endif
     sbuf_trim(&sb);
     sbuf_finish(&sb);
     error = sysctl_handle_string(oidp, sbuf_data(&sb), sbuf_len(&sb), req);
