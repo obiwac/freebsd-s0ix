@@ -589,7 +589,8 @@ acpi_pwr_switch_consumer(ACPI_HANDLE consumer, int state)
      */
     if (ACPI_FAILURE(AcpiGetHandle(consumer, method_name, &method_handle)))
 	method_handle = NULL;
-    if (ACPI_FAILURE(AcpiGetHandle(consumer, reslist_name, &reslist_handle)))
+    if (reslist_name == NULL ||
+	ACPI_FAILURE(AcpiGetHandle(consumer, reslist_name, &reslist_handle)))
 	reslist_handle = NULL;
     if (reslist_handle == NULL && method_handle == NULL) {
 	if (state == ACPI_STATE_D0) {
