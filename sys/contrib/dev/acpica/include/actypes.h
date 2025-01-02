@@ -741,8 +741,9 @@ typedef UINT64                          ACPI_INTEGER;
 #define ACPI_STATE_D0                   (UINT8) 0
 #define ACPI_STATE_D1                   (UINT8) 1
 #define ACPI_STATE_D2                   (UINT8) 2
-#define ACPI_STATE_D3                   (UINT8) 3
+#define ACPI_STATE_D3_HOT               (UINT8) 3
 #define ACPI_STATE_D3_COLD              (UINT8) 4
+#define ACPI_STATE_D3                   ACPI_STATE_D3_COLD
 #define ACPI_D_STATES_MAX               ACPI_STATE_D3_COLD
 #define ACPI_D_STATE_COUNT              5
 
