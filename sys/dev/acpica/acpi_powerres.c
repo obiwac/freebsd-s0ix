@@ -563,9 +563,12 @@ acpi_pwr_switch_consumer(ACPI_HANDLE consumer, int state)
 	reslist_name = "_PR2";
 	break;
     case ACPI_STATE_D3_HOT:
+	method_name = "_PS3";
 	reslist_name = "_PR3";
+	break;
     case ACPI_STATE_D3_COLD:
 	method_name = "_PS3";
+	reslist_name = NULL;
 	break;
     default:
 	goto out;
