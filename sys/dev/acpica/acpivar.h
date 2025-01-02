@@ -47,6 +47,8 @@
 #include <machine/bus.h>
 #include <machine/resource.h>
 
+#include <contrib/dev/acpica/include/actypes.h>
+
 enum sleep_type {
 	AWAKE		= ACPI_STATE_S0,
 	STANDBY		= ACPI_STATE_S1,
@@ -138,7 +140,7 @@ struct apm_clone_data {
 struct acpi_prw_data {
     ACPI_HANDLE		gpe_handle;
     int			gpe_bit;
-    int			lowest_wake;
+    int			deepest_wake;
     ACPI_OBJECT		power_res[ACPI_PRW_MAX_POWERRES];
     int			power_res_count;
 };

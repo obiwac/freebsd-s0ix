@@ -3650,14 +3650,16 @@ acpi_wake_sleep_prep(ACPI_HANDLE handle, int sstate)
      * the user requested it be enabled, turn on any required power resources
      * and set _PSW.
      */
-    if (sstate > prw.lowest_wake) {
+    if (sstate > prw.deepest_wake) {
 	AcpiSetGpeWakeMask(prw.gpe_handle, prw.gpe_bit, ACPI_GPE_DISABLE);
 	if (bootverbose)
 	    device_printf(dev, "wake_prep disabled wake for %s (S%d)\n",
 		acpi_name(handle), sstate);
     } else if (dev && (acpi_get_flags(dev) & ACPI_FLAG_WAKE_ENABLED) != 0) {
 	acpi_pwr_wake_enable(handle, 1);
-	acpi_SetInteger(handle, "_PSW", 1);
+	if (acpi_SetInteger(handle, "_PSW", 1) != AE_OK)
+	    device_printf(dev, "setting _PSW failed, device possibly only "
+		"supports _DSW\n");
 	if (bootverbose)
 	    device_printf(dev, "wake_prep enabled for %s (S%d)\n",
 		acpi_name(handle), sstate);
@@ -3687,7 +3689,7 @@ acpi_wake_run_prep(ACPI_HANDLE handle, int sstate)
      * disabled before going to sleep so re-enable it.  If it was enabled,
      * clear _PSW and turn off any power resources it used.
      */
-    if (sstate > prw.lowest_wake) {
+    if (sstate > prw.deepest_wake) {
 	AcpiSetGpeWakeMask(prw.gpe_handle, prw.gpe_bit, ACPI_GPE_ENABLE);
 	if (bootverbose)
 	    device_printf(dev, "run_prep re-enabled %s\n", acpi_name(handle));
@@ -3817,7 +3819,7 @@ acpi_parse_prw(ACPI_HANDLE h, struct acpi_prw_data *prw)
      * providing wake functionality.  The sleeping state being entered must
      * be less than (i.e., higher power) or equal to this value.
      */
-    if (acpi_PkgInt32(res, 1, &prw->lowest_wake) != 0)
+    if (acpi_PkgInt32(res, 1, &prw->deepest_wake) != 0)
 	goto out;
 
     /*
