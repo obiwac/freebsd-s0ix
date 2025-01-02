@@ -693,8 +693,19 @@ acpi_pwr_switch_consumer(ACPI_HANDLE consumer, int state)
 	}
     }
 
+    /* Make sure the transition succeeded. */
+    int new_state;
+    if (ACPI_FAILURE(acpi_pwr_get_state(consumer, &new_state)))
+	ACPI_DEBUG_PRINT((ACPI_DB_OBJECTS, "failed to get new D-state\n"));
+    else if (new_state != state) {
+	ACPI_DEBUG_PRINT((ACPI_DB_OBJECTS,
+			 "new power state (D%d) is not the one requested (D%d)\n",
+			 new_state, state));
+	pc->ac_state = new_state;
+    } else
+	pc->ac_state = state;
+
     /* Transition was successful */
-    pc->ac_state = state;
     status = AE_OK;
 
 out:
