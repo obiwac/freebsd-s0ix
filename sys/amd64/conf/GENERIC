@@ -91,7 +91,6 @@ options 	RCTL			# Resource limits
 
 # Debugging support.  Always need this:
 options 	KDB			# Enable kernel debugger support.
-options 	DDB			# Enable kernel debugger support.
 options 	KDB_TRACE		# Print a stack trace for a panic.
 
 # Kernel Sanitizers

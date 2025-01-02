@@ -328,7 +328,7 @@ acpi_pwr_register_consumer(ACPI_HANDLE consumer)
      */
     acpi_pwr_get_power_resources(consumer, pc);
 
-    /* Find it's initial state. */
+    /* Find its initial state. */
     if (ACPI_FAILURE(acpi_pwr_get_state(consumer, &pc->ac_state)))
 	pc->ac_state = ACPI_STATE_UNKNOWN;
 
