@@ -51,25 +51,25 @@ enum dsm_set {
 };
 
 enum intel_dsm_index {
-	DSM_INDEX_ENUM_FUNCTIONS 		= 0,
-	DSM_INDEX_GET_DEVICE_CONSTRAINTS	= 1,
-	DSM_INDEX_GET_CRASH_DUMP_DEVICE		= 2,
-	DSM_INDEX_DISPLAY_OFF_NOTIFICATION	= 3,
-	DSM_INDEX_DISPLAY_ON_NOTIFICATION	= 4,
-	DSM_INDEX_ENTRY_NOTIFICATION		= 5,
-	DSM_INDEX_EXIT_NOTIFICATION		= 6,
+	DSM_ENUM_FUNCTIONS 		= 0,
+	DSM_GET_DEVICE_CONSTRAINTS	= 1,
+	DSM_GET_CRASH_DUMP_DEVICE	= 2,
+	DSM_DISPLAY_OFF_NOTIF		= 3,
+	DSM_DISPLAY_ON_NOTIF		= 4,
+	DSM_ENTRY_NOTIF			= 5,
+	DSM_EXIT_NOTIF			= 6,
 	/* Only for Microsoft DSM set. */
-	DSM_INDEX_MODERN_ENTRY_NOTIFICATION	= 7,
-	DSM_INDEX_MODERN_EXIT_NOTIFICATION	= 8,
+	DSM_MODERN_ENTRY_NOTIF		= 7,
+	DSM_MODERN_EXIT_NOTIF		= 8,
 };
 
 enum amd_dsm_index {
-	AMD_DSM_INDEX_ENUM_FUNCTIONS		= 0,
-	AMD_DSM_INDEX_GET_DEVICE_CONSTRAINTS	= 1,
-	AMD_DSM_INDEX_ENTRY_NOTIFICATION	= 2,
-	AMD_DSM_INDEX_EXIT_NOTIFICATION		= 3,
-	AMD_DSM_INDEX_DISPLAY_OFF_NOTIFICATION	= 4,
-	AMD_DSM_INDEX_DISPLAY_ON_NOTIFICATION	= 5,
+	AMD_DSM_ENUM_FUNCTIONS		= 0,
+	AMD_DSM_GET_DEVICE_CONSTRAINTS	= 1,
+	AMD_DSM_ENTRY_NOTIF		= 2,
+	AMD_DSM_EXIT_NOTIF		= 3,
+	AMD_DSM_DISPLAY_OFF_NOTIF	= 4,
+	AMD_DSM_DISPLAY_ON_NOTIF	= 5,
 };
 
 union dsm_index {
@@ -101,14 +101,15 @@ struct acpi_spmc_softc {
 	ACPI_HANDLE 	handle;
 	ACPI_OBJECT	*obj;
 	enum dsm_set	dsm_sets;
-	struct uuid	*dsm_uuid;
 
 	bool				constraints_populated;
 	size_t				constraint_count;
 	struct acpi_spmc_constraint	*constraints;
 };
 
-static int acpi_spmc_get_device_constraints(device_t dev);
+static int acpi_spmc_get_constraints(device_t dev);
+static void acpi_spmc_free_constraints(struct acpi_spmc_softc *sc);
+
 static int acpi_spmc_enter(device_t dev);
 static int acpi_spmc_exit(device_t dev);
 
@@ -192,14 +193,6 @@ acpi_spmc_attach(device_t dev)
 	sc->dsm_sets = private->dsm_sets;
 	free(private, M_TEMP);
 
-	/* Prefer original Intel DSM spec, then Microsoft, then, finally AMD. */
-	if ((sc->dsm_sets & DSM_SET_INTEL) != 0)
-		sc->dsm_uuid = &intel_dsm_uuid;
-	else if ((sc->dsm_sets & DSM_SET_MS) != 0)
-		sc->dsm_uuid = &ms_dsm_uuid;
-	else if ((sc->dsm_sets & DSM_SET_AMD) != 0)
-		sc->dsm_uuid = &amd_dsm_uuid;
-
 	sc->handle = acpi_get_handle(dev);
 	if (sc->handle == NULL)
 		return (ENXIO);
@@ -209,6 +202,9 @@ acpi_spmc_attach(device_t dev)
 	sc->constraints = NULL;
 
 	acpi_sc = acpi_device_get_parent_softc(sc->dev);
+
+	/* Get device constraints. We can only call this once so do this now. */
+	acpi_spmc_get_constraints(sc->dev);
 
 	/* Set the callbacks for when entering/exiting sleep. */
 	acpi_sc->acpi_spmc_device = dev;
@@ -222,11 +218,12 @@ static int
 acpi_spmc_detach(device_t dev)
 {
 
+	acpi_spmc_free_constraints(device_get_softc(dev));
 	return (0);
 }
 
 static void
-free_constraints(struct acpi_spmc_softc *sc)
+acpi_spmc_free_constraints(struct acpi_spmc_softc *sc)
 {
 	if (sc->constraints == NULL)
 		return;
@@ -241,15 +238,13 @@ free_constraints(struct acpi_spmc_softc *sc)
 }
 
 static int
-get_constraints_spec(struct acpi_spmc_softc *sc, ACPI_OBJECT *object)
+acpi_spmc_get_constraints_spec(struct acpi_spmc_softc *sc, ACPI_OBJECT *object)
 {
 	struct acpi_spmc_constraint *constraint;
 	ACPI_OBJECT	*constraint_obj;
 	ACPI_OBJECT	*name_obj;
 	ACPI_OBJECT	*detail;
 	ACPI_OBJECT	*constraint_package;
-
-	/* TODO I haven't tested this yet, but I think it's to-spec. */
 
 	KASSERT(sc->constraints_populated == false,
 	    "constraints already populated");
@@ -271,7 +266,7 @@ get_constraints_spec(struct acpi_spmc_softc *sc, ACPI_OBJECT *object)
 		name_obj = &constraint_obj->Package.Elements[0];
 		constraint->name = strdup(name_obj->String.Pointer, M_TEMP);
 		if (constraint->name == NULL) {
-			free_constraints(sc);
+			acpi_spmc_free_constraints(sc);
 			return (ENOMEM);
 		}
 
@@ -295,7 +290,7 @@ get_constraints_spec(struct acpi_spmc_softc *sc, ACPI_OBJECT *object)
 }
 
 static int
-get_constraints_amd(struct acpi_spmc_softc *sc, ACPI_OBJECT *object)
+acpi_spmc_get_constraints_amd(struct acpi_spmc_softc *sc, ACPI_OBJECT *object)
 {
 	size_t		constraint_count;
 	ACPI_OBJECT	*constraint_obj;
@@ -333,7 +328,7 @@ get_constraints_amd(struct acpi_spmc_softc *sc, ACPI_OBJECT *object)
 		if (constraint_obj->Package.Count != 4) {
 			device_printf(sc->dev, "constraint %zu has %d elements\n",
 			    i, constraint_obj->Package.Count);
-			free_constraints(sc);
+			acpi_spmc_free_constraints(sc);
 			return (ENXIO);
 		}
 
@@ -344,7 +339,7 @@ get_constraints_amd(struct acpi_spmc_softc *sc, ACPI_OBJECT *object)
 		name_obj = &constraint_obj->Package.Elements[1];
 		constraint->name = strdup(name_obj->String.Pointer, M_TEMP);
 		if (constraint->name == NULL) {
-			free_constraints(sc);
+			acpi_spmc_free_constraints(sc);
 			return (ENOMEM);
 		}
 
@@ -352,20 +347,115 @@ get_constraints_amd(struct acpi_spmc_softc *sc, ACPI_OBJECT *object)
 		    constraint_obj->Package.Elements[2].Integer.Value;
 		constraint->min_d_state =
 		    constraint_obj->Package.Elements[3].Integer.Value;
-
-		/*
-		int d_state;
-		if (ACPI_FAILURE(acpi_pwr_get_consumer(constraint->handle, &d_state)))
-			continue;
-		*/
 	}
 
 	sc->constraints_populated = true;
 	return (0);
 }
 
+static int
+acpi_spmc_get_constraints(device_t dev)
+{
+	struct acpi_spmc_softc	*sc;
+	union dsm_index		dsm_index;
+	struct uuid		*dsm_uuid;
+	ACPI_STATUS		status;
+	ACPI_BUFFER		result;
+	ACPI_OBJECT		*object;
+	bool			is_amd;
+	int			rv;
+	struct acpi_spmc_constraint	*constraint;
+
+	sc = device_get_softc(dev);
+	if (sc->constraints_populated)
+		return (0);
+
+	/* XXX Assumes anything else (only Intel and MS right now) is to spec. */
+	is_amd = (sc->dsm_sets & DSM_SET_AMD) != 0;
+	if (is_amd) {
+		dsm_uuid = &amd_dsm_uuid;
+		dsm_index.amd = AMD_DSM_GET_DEVICE_CONSTRAINTS;
+	} else {
+		if (sc->dsm_sets & DSM_SET_MS)
+			dsm_uuid = &ms_dsm_uuid;
+		else
+			dsm_uuid = &intel_dsm_uuid;
+		dsm_index.regular = DSM_GET_DEVICE_CONSTRAINTS;
+	}
+
+	/* XXX It seems like this DSM fails if called more than once. */
+	status = acpi_EvaluateDSMTyped(sc->handle, (uint8_t *)dsm_uuid,
+	    rev_for_uuid(dsm_uuid), dsm_index.i, NULL, &result,
+	    ACPI_TYPE_PACKAGE);
+	if (ACPI_FAILURE(status) || result.Pointer == NULL) {
+		device_printf(dev, "failed to call DSM %d (%s)\n", dsm_index.i,
+		    __func__);
+		return (ENXIO);
+	}
+
+	object = (ACPI_OBJECT *)result.Pointer;
+	if (is_amd)
+		rv = acpi_spmc_get_constraints_amd(sc, object);
+	else
+		rv = acpi_spmc_get_constraints_spec(sc, object);
+	AcpiOsFree(object);
+	if (rv != 0)
+		return (rv);
+
+	/* Get handles for each constraint device. */
+	for (size_t i = 0; i < sc->constraint_count; i++) {
+		constraint = &sc->constraints[i];
+
+		status = acpi_GetHandleInScope(sc->handle,
+		    __DECONST(char *, constraint->name), &constraint->handle);
+		if (ACPI_FAILURE(status)) {
+			device_printf(dev, "failed to get handle for %s\n",
+			    constraint->name);
+			constraint->handle = NULL;
+		}
+	}
+	return (0);
+}
+
 static void
-run_dsm(device_t dev, struct uuid *uuid, int index)
+acpi_spmc_check_constraints(struct acpi_spmc_softc *sc)
+{
+
+	KASSERT(sc->constraints_populated, "constraints not populated");
+
+	for (size_t i = 0; i < sc->constraint_count; i++) {
+		struct acpi_spmc_constraint *constraint = &sc->constraints[i];
+
+		if (!constraint->enabled)
+			continue;
+		if (constraint->handle == NULL)
+			continue;
+
+		ACPI_STATUS status = acpi_GetHandleInScope(sc->handle,
+		    __DECONST(char *, constraint->name), &constraint->handle);
+		if (ACPI_FAILURE(status)) {
+			device_printf(sc->dev, "failed to get handle for %s\n",
+			    constraint->name);
+			constraint->handle = NULL;
+		}
+		if (constraint->handle == NULL)
+			continue;
+
+		int d_state;
+		if (ACPI_FAILURE(acpi_pwr_get_state(constraint->handle, &d_state)))
+			continue;
+		if (d_state < constraint->min_d_state)
+			device_printf(sc->dev, "constraint for device %s"
+			    " violated (minimum D-state required was %s, actual"
+			    " D-state is %s), might fail to enter LPI state\n",
+			    constraint->name,
+			    acpi_d_state_to_str(constraint->min_d_state),
+			    acpi_d_state_to_str(d_state));
+	}
+}
+
+static void
+acpi_spmc_run_dsm(device_t dev, struct uuid *uuid, int index)
 {
 	struct acpi_spmc_softc *sc;
 	ACPI_STATUS status;
@@ -386,72 +476,17 @@ run_dsm(device_t dev, struct uuid *uuid, int index)
 	AcpiOsFree(result.Pointer);
 }
 
-__attribute__((unused)) // TODO Check device constraints before entering as a sanity-check. Also sysctl with this info would be nice.
-static int
-acpi_spmc_get_device_constraints(device_t dev)
-{
-	struct acpi_spmc_softc	*sc;
-	union dsm_index		dsm_index;
-	ACPI_STATUS		status;
-	ACPI_BUFFER		result;
-	ACPI_OBJECT		*object;
-	bool			is_amd;
-	int			rv;
-	struct acpi_spmc_constraint	*constraint;
-
-	sc = device_get_softc(dev);
-	if (sc->constraints_populated)
-		return (0);
-
-	is_amd = (sc->dsm_sets & DSM_SET_AMD) != 0; /* XXX Assumes anything else (only Intel and MS right now) is to spec. */
-	if (is_amd)
-		dsm_index.amd = AMD_DSM_INDEX_GET_DEVICE_CONSTRAINTS;
-	else
-		dsm_index.regular = DSM_INDEX_GET_DEVICE_CONSTRAINTS;
-
-	/* XXX It seems like this DSM fails if called more than once. */
-	status = acpi_EvaluateDSMTyped(sc->handle, (uint8_t *)sc->dsm_uuid,
-	    rev_for_uuid(sc->dsm_uuid), dsm_index.i, NULL, &result,
-	    ACPI_TYPE_PACKAGE);
-	if (ACPI_FAILURE(status) || result.Pointer == NULL) {
-		device_printf(dev, "failed to call DSM %d (%s)\n", dsm_index.i,
-		    __func__);
-		return (ENXIO);
-	}
-
-	object = (ACPI_OBJECT *)result.Pointer;
-	if (is_amd)
-		rv = get_constraints_amd(sc, object);
-	else
-		rv = get_constraints_spec(sc, object);
-	AcpiOsFree(object);
-	if (rv != 0)
-		return (rv);
-
-	/* Get handles for each constraint device. */
-	for (size_t i = 0; i < sc->constraint_count; i++) {
-		constraint = &sc->constraints[i];
-
-		status = acpi_GetHandleInScope(sc->handle,
-		    __DECONST(char *, constraint->name), &constraint->handle);
-		if (ACPI_FAILURE(status)) // TODO Should we full-on error here?
-			device_printf(dev, "failed to get handle for %s\n",
-			    constraint->name);
-	}
-	return (0);
-}
-
 static void
 acpi_spmc_display_off_notif(device_t dev)
 {
 	struct acpi_spmc_softc *sc = device_get_softc(dev);
 
 	if (sc->dsm_sets & DSM_SET_INTEL)
-		run_dsm(dev, &intel_dsm_uuid, DSM_INDEX_DISPLAY_OFF_NOTIFICATION);
+		acpi_spmc_run_dsm(dev, &intel_dsm_uuid, DSM_DISPLAY_OFF_NOTIF);
 	if (sc->dsm_sets & DSM_SET_MS)
-		run_dsm(dev, &ms_dsm_uuid, DSM_INDEX_DISPLAY_OFF_NOTIFICATION);
+		acpi_spmc_run_dsm(dev, &ms_dsm_uuid, DSM_DISPLAY_OFF_NOTIF);
 	if (sc->dsm_sets & DSM_SET_AMD)
-		run_dsm(dev, &amd_dsm_uuid, AMD_DSM_INDEX_DISPLAY_OFF_NOTIFICATION);
+		acpi_spmc_run_dsm(dev, &amd_dsm_uuid, AMD_DSM_DISPLAY_OFF_NOTIF);
 }
 
 static void
@@ -460,11 +495,11 @@ acpi_spmc_display_on_notif(device_t dev)
 	struct acpi_spmc_softc *sc = device_get_softc(dev);
 
 	if (sc->dsm_sets & DSM_SET_INTEL)
-		run_dsm(dev, &intel_dsm_uuid, DSM_INDEX_DISPLAY_ON_NOTIFICATION);
+		acpi_spmc_run_dsm(dev, &intel_dsm_uuid, DSM_DISPLAY_ON_NOTIF);
 	if (sc->dsm_sets & DSM_SET_MS)
-		run_dsm(dev, &ms_dsm_uuid, DSM_INDEX_DISPLAY_ON_NOTIFICATION);
+		acpi_spmc_run_dsm(dev, &ms_dsm_uuid, DSM_DISPLAY_ON_NOTIF);
 	if (sc->dsm_sets & DSM_SET_AMD)
-		run_dsm(dev, &amd_dsm_uuid, AMD_DSM_INDEX_DISPLAY_ON_NOTIFICATION);
+		acpi_spmc_run_dsm(dev, &amd_dsm_uuid, AMD_DSM_DISPLAY_ON_NOTIF);
 }
 
 static void
@@ -472,14 +507,16 @@ acpi_spmc_entry_notif(device_t dev)
 {
 	struct acpi_spmc_softc *sc = device_get_softc(dev);
 
+	acpi_spmc_check_constraints(sc);
+
 	if (sc->dsm_sets & DSM_SET_INTEL)
-		run_dsm(dev, &intel_dsm_uuid, DSM_INDEX_ENTRY_NOTIFICATION);
+		acpi_spmc_run_dsm(dev, &intel_dsm_uuid, DSM_ENTRY_NOTIF);
 	if (sc->dsm_sets & DSM_SET_MS) {
-		run_dsm(dev, &ms_dsm_uuid, DSM_INDEX_ENTRY_NOTIFICATION);
-		run_dsm(dev, &ms_dsm_uuid, DSM_INDEX_MODERN_ENTRY_NOTIFICATION);
+		acpi_spmc_run_dsm(dev, &ms_dsm_uuid, DSM_ENTRY_NOTIF);
+		acpi_spmc_run_dsm(dev, &ms_dsm_uuid, DSM_MODERN_ENTRY_NOTIF);
 	}
 	if (sc->dsm_sets & DSM_SET_AMD)
-		run_dsm(dev, &amd_dsm_uuid, AMD_DSM_INDEX_ENTRY_NOTIFICATION);
+		acpi_spmc_run_dsm(dev, &amd_dsm_uuid, AMD_DSM_ENTRY_NOTIF);
 }
 
 static void
@@ -488,13 +525,13 @@ acpi_spmc_exit_notif(device_t dev)
 	struct acpi_spmc_softc *sc = device_get_softc(dev);
 
 	if (sc->dsm_sets & DSM_SET_INTEL)
-		run_dsm(dev, &intel_dsm_uuid, DSM_INDEX_EXIT_NOTIFICATION);
+		acpi_spmc_run_dsm(dev, &intel_dsm_uuid, DSM_EXIT_NOTIF);
 	if (sc->dsm_sets & DSM_SET_MS) {
-		run_dsm(dev, &ms_dsm_uuid, DSM_INDEX_EXIT_NOTIFICATION);
-		run_dsm(dev, &ms_dsm_uuid, DSM_INDEX_MODERN_EXIT_NOTIFICATION);
+		acpi_spmc_run_dsm(dev, &ms_dsm_uuid, DSM_EXIT_NOTIF);
+		acpi_spmc_run_dsm(dev, &ms_dsm_uuid, DSM_MODERN_EXIT_NOTIF);
 	}
 	if (sc->dsm_sets & DSM_SET_AMD)
-		run_dsm(dev, &amd_dsm_uuid, AMD_DSM_INDEX_EXIT_NOTIFICATION);
+		acpi_spmc_run_dsm(dev, &amd_dsm_uuid, AMD_DSM_EXIT_NOTIF);
 }
 
 static int
