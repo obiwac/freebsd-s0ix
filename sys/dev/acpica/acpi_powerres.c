@@ -363,6 +363,8 @@ acpi_pwr_deregister_consumer(ACPI_HANDLE consumer)
 
     /* Pull the consumer off the list and free it */
     TAILQ_REMOVE(&acpi_powerconsumers, pc, ac_link);
+    for (size_t i = 0; i < sizeof(pc->ac_prx) / sizeof(*pc->ac_prx); i++)
+	free(pc->ac_prx[i].prx_deps, M_ACPIPWR);
     free(pc, M_ACPIPWR);
 
     ACPI_DEBUG_PRINT((ACPI_DB_OBJECTS, "deregistered power consumer %s\n",
@@ -374,20 +376,14 @@ acpi_pwr_deregister_consumer(ACPI_HANDLE consumer)
 
 /*
  * The _PSC control method isn't required if it's possible to infer the D-state
- * from the _PR* control methods. (See 7.3.6.)
+ * from the _PRx control methods.  (See 7.3.6.)
  * We can infer that a given D-state has been achieved when all the dependencies
  * are in the ON state.
  */
 static ACPI_STATUS
 acpi_pwr_infer_state(ACPI_HANDLE consumer, struct acpi_powerconsumer *pc)
 {
-    ACPI_INTEGER	status;
-    ACPI_STRING		reslist_name;
-    ACPI_HANDLE		reslist_handle;
-    ACPI_STRING		reslist_names[] = {"_PR0", "_PR1", "_PR2", "_PR3"};
-    ACPI_BUFFER		result;
-    ACPI_OBJECT		*object;
-    ACPI_OBJECT		*dep;
+    ACPI_HANDLE		*res;
     uint32_t		on;
     bool		all_on = false;
 
@@ -403,30 +399,23 @@ acpi_pwr_infer_state(ACPI_HANDLE consumer, struct acpi_powerconsumer *pc)
 	pc->ac_state <= ACPI_STATE_D3 && !all_on;
 	pc->ac_state++
     ) {
-	/* First, get the dependencies of this power state. */
-	reslist_name = reslist_names[pc->ac_state - ACPI_STATE_D0];
-	if (ACPI_FAILURE(AcpiGetHandle(consumer, reslist_name, &reslist_handle)))
+	MPASS(pc->ac_state <= sizeof(pc->ac_prx) / sizeof(*pc->ac_prx));
+
+	if (!pc->ac_prx[pc->ac_state].prx_has)
 	    continue;
 
-	status = AcpiEvaluateObjectTyped(reslist_handle, NULL, NULL, &result,
-					 ACPI_TYPE_PACKAGE);
-	if (ACPI_FAILURE(status) || result.Pointer == NULL)
-	    continue;
-
-	object = (ACPI_OBJECT *)result.Pointer;
 	all_on = true;
 
-	for (size_t i = 0; i < object->Package.Count; i++) {
-	    dep = &object->Package.Elements[i];
+	for (size_t i = 0; i < pc->ac_prx[pc->ac_state].prx_count; i++) {
+	    res = pc->ac_prx[pc->ac_state].prx_deps[i];
 	    /* If failure, better to assume D-state is hotter than colder. */
-	    if (ACPI_FAILURE(acpi_GetInteger(dep->Reference.Handle, "_STA", &on)))
+	    if (ACPI_FAILURE(acpi_GetInteger(res, "_STA", &on)))
 		continue;
 	    if (on == 0) {
 		all_on = false;
 		break;
 	    }
 	}
-	/* XXX? AcpiOsFree(object); */
     }
 
     if (pc->ac_state == ACPI_STATE_D0)
