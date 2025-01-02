@@ -418,8 +418,17 @@ acpi_pwr_infer_state(ACPI_HANDLE consumer, struct acpi_powerconsumer *pc)
 	}
     }
 
-    if (pc->ac_state == ACPI_STATE_D0)
-	pc->ac_state = ACPI_STATE_UNKNOWN;
+    MPASS(pc->ac_state != ACPI_STATE_D0);
+
+    /*
+     * If none of the power resources required for the shallower D-states are
+     * on, then we can assume it is unpowered (i.e. D3cold).
+     * TODO Not all devices are required to support D3cold, some should default
+     * to D3hot in this situation.
+     * D3cold is assumed to be supported when _PR3 is explicitly provided.
+     */
+    if (!all_on)
+	pc->ac_state = ACPI_STATE_D3_COLD;
     else
 	pc->ac_state--;
 
