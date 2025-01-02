@@ -526,9 +526,17 @@ acpi_pwr_switch_consumer(ACPI_HANDLE consumer, int state)
 	    panic("acpi added power consumer but can't find it");
     }
 
-    /* Check for valid transitions.  We can only go to D0 from D3. */
+    /* Stop here if we're already at the target D-state. */
+    if (pc->ac_state == state) {
+	status = AE_OK;
+	goto out;
+    }
+
+    /* Check for valid transitions.  From D3 or D3cold, we can only go to D0. */
     status = AE_BAD_PARAMETER;
     if (pc->ac_state == ACPI_STATE_D3 && state != ACPI_STATE_D0)
+	goto out;
+    if (pc->ac_state == ACPI_STATE_D3_COLD && state != ACPI_STATE_D0)
 	goto out;
 
     /* Find transition mechanism(s) */
@@ -546,8 +554,9 @@ acpi_pwr_switch_consumer(ACPI_HANDLE consumer, int state)
 	reslist_name = "_PR2";
 	break;
     case ACPI_STATE_D3:
-	method_name = "_PS3";
 	reslist_name = "_PR3";
+    case ACPI_STATE_D3_COLD:
+	method_name = "_PS3";
 	break;
     default:
 	goto out;
@@ -574,6 +583,9 @@ acpi_pwr_switch_consumer(ACPI_HANDLE consumer, int state)
 	    pc->ac_state = ACPI_STATE_D0;
 	    status = AE_OK;
 	    goto out;
+	}
+	if (state == ACPI_STATE_D3_COLD) {
+	    state = ACPI_STATE_D3;
 	}
 	if (state != ACPI_STATE_D3) {
 	    ACPI_DEBUG_PRINT((ACPI_DB_OBJECTS,
