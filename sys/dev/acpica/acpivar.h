@@ -492,8 +492,7 @@ acpi_get_verbose(struct acpi_softc *sc)
 static __inline char const *
 acpi_d_state_to_str(int state)
 {
-    char const *strs[ACPI_D_STATE_COUNT] = {"D0", "D1", "D2", "D3hot",
-	"D3cold"};
+    char const *strs[ACPI_D_STATE_COUNT] = {"D0", "D1", "D2", "D3", "D3cold"};
 
     MPASS(state >= ACPI_STATE_D0 && state <= ACPI_D_STATES_MAX);
     return strs[state];
