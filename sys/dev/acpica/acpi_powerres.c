@@ -439,7 +439,7 @@ acpi_pwr_infer_state(ACPI_HANDLE consumer, struct acpi_powerconsumer *pc)
  * Get a power consumer's D-state.
  */
 ACPI_STATUS
-acpi_pwr_get_consumer(ACPI_HANDLE consumer, int *state)
+acpi_pwr_get_state(ACPI_HANDLE consumer, int *state)
 {
 
     struct acpi_powerconsumer	*pc;
@@ -475,6 +475,8 @@ acpi_pwr_get_consumer(ACPI_HANDLE consumer, int *state)
 	goto out;
     }
 
+    result.Pointer = NULL;
+    result.Length = ACPI_ALLOCATE_BUFFER;
     status = AcpiEvaluateObjectTyped(method_handle, NULL, NULL, &result, ACPI_TYPE_INTEGER);
     if (ACPI_FAILURE(status) || result.Pointer == NULL) {
 	ACPI_DEBUG_PRINT((ACPI_DB_OBJECTS, "failed to get state with _PSC - %s\n",
@@ -505,7 +507,7 @@ acpi_pwr_switch_consumer(ACPI_HANDLE consumer, int state)
     ACPI_BUFFER			reslist_buffer;
     ACPI_OBJECT			*reslist_object;
     ACPI_STATUS			status;
-    char			*method_name, *reslist_name;
+    char			*method_name, *reslist_name = NULL;
 
     ACPI_FUNCTION_TRACE((char *)(uintptr_t)__func__);
 
