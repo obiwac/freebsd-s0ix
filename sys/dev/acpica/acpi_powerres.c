@@ -532,11 +532,20 @@ acpi_pwr_switch_consumer(ACPI_HANDLE consumer, int state)
 	goto out;
     }
 
-    /* Check for valid transitions.  From D3 or D3cold, we can only go to D0. */
+    /*
+     * Check for valid transitions.  From D3hot or D3cold, we can only go to D0.
+     * The exception to this is going from D3hot to D3cold or the other way
+     * around.  This is because they both use _PS3, so the only difference when
+     * doing these transitions is whether or not the power resources for _PR3
+     * are on for devices which support D3cold, and turning these power
+     * resources on/off is always perfectly fine (ACPI 7.3.11).
+     */
     status = AE_BAD_PARAMETER;
-    if (pc->ac_state == ACPI_STATE_D3_HOT && state != ACPI_STATE_D0)
+    if (pc->ac_state == ACPI_STATE_D3_HOT && state != ACPI_STATE_D0 &&
+	state != ACPI_STATE_D3_COLD)
 	goto out;
-    if (pc->ac_state == ACPI_STATE_D3_COLD && state != ACPI_STATE_D0)
+    if (pc->ac_state == ACPI_STATE_D3_COLD && state != ACPI_STATE_D0 &&
+	state != ACPI_STATE_D3_HOT)
 	goto out;
 
     /* Find transition mechanism(s) */
