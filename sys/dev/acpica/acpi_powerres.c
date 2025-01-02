@@ -254,7 +254,7 @@ acpi_pwr_get_power_resources(ACPI_HANDLE consumer, struct acpi_powerconsumer *pc
     if (consumer == NULL)
 	return_ACPI_STATUS (AE_NOT_FOUND);
 
-    for (int state = ACPI_STATE_D0; state <= ACPI_STATE_D3; state++) {
+    for (int state = ACPI_STATE_D0; state <= ACPI_STATE_D3_HOT; state++) {
 	pc->ac_prx[state].prx_has = false;
 	pc->ac_prx[state].prx_count = 0;
 	pc->ac_prx[state].prx_deps = NULL;
@@ -396,7 +396,7 @@ acpi_pwr_infer_state(ACPI_HANDLE consumer, struct acpi_powerconsumer *pc)
     /* It is important we go from the hottest to the coldest state. */
     for (
 	pc->ac_state = ACPI_STATE_D0;
-	pc->ac_state <= ACPI_STATE_D3 && !all_on;
+	pc->ac_state <= ACPI_STATE_D3_HOT && !all_on;
 	pc->ac_state++
     ) {
 	MPASS(pc->ac_state <= sizeof(pc->ac_prx) / sizeof(*pc->ac_prx));
@@ -534,7 +534,7 @@ acpi_pwr_switch_consumer(ACPI_HANDLE consumer, int state)
 
     /* Check for valid transitions.  From D3 or D3cold, we can only go to D0. */
     status = AE_BAD_PARAMETER;
-    if (pc->ac_state == ACPI_STATE_D3 && state != ACPI_STATE_D0)
+    if (pc->ac_state == ACPI_STATE_D3_HOT && state != ACPI_STATE_D0)
 	goto out;
     if (pc->ac_state == ACPI_STATE_D3_COLD && state != ACPI_STATE_D0)
 	goto out;
@@ -553,7 +553,7 @@ acpi_pwr_switch_consumer(ACPI_HANDLE consumer, int state)
 	method_name = "_PS2";
 	reslist_name = "_PR2";
 	break;
-    case ACPI_STATE_D3:
+    case ACPI_STATE_D3_HOT:
 	reslist_name = "_PR3";
     case ACPI_STATE_D3_COLD:
 	method_name = "_PS3";
@@ -585,9 +585,9 @@ acpi_pwr_switch_consumer(ACPI_HANDLE consumer, int state)
 	    goto out;
 	}
 	if (state == ACPI_STATE_D3_COLD) {
-	    state = ACPI_STATE_D3;
+	    state = ACPI_STATE_D3_HOT;
 	}
-	if (state != ACPI_STATE_D3) {
+	if (state != ACPI_STATE_D3_HOT) {
 	    ACPI_DEBUG_PRINT((ACPI_DB_OBJECTS,
 		"attempt to set unsupported state D%d\n", state));
 	    goto out;
