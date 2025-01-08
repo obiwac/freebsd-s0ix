@@ -76,6 +76,13 @@ struct acpi_powerconsumer {
     /* Device which is powered */
     ACPI_HANDLE				ac_consumer;
     int					ac_state;
+
+    struct {
+	bool				prx_has;
+	size_t				prx_count;
+	ACPI_HANDLE			*prx_deps;
+    } ac_prx[ACPI_D_STATE_COUNT];
+
     TAILQ_ENTRY(acpi_powerconsumer)	ac_link;
     TAILQ_HEAD(,acpi_powerreference)	ac_references;
 };
@@ -222,6 +229,76 @@ acpi_pwr_deregister_resource(ACPI_HANDLE res)
 #endif /* notyet */
 
 /*
+ * Evaluate the _PRx (power resources each D-state depends on).  This also
+ * populates the acpi_powerresources queue with the power resources discovered
+ * during this step.
+ *
+ * ACPI 7.3.8 - 7.3.11 guarantee that _PRx will return the same data each
+ * time they are evaluated.
+ */
+static ACPI_STATUS
+acpi_pwr_get_power_resources(ACPI_HANDLE consumer, struct acpi_powerconsumer *pc)
+{
+    ACPI_INTEGER	status;
+    ACPI_STRING		reslist_name;
+    ACPI_HANDLE		reslist_handle;
+    ACPI_STRING		reslist_names[] = {"_PR0", "_PR1", "_PR2", "_PR3"};
+    ACPI_BUFFER		reslist;
+    ACPI_OBJECT		*reslist_object;
+    ACPI_OBJECT		*dep;
+    ACPI_HANDLE		*res;
+
+    ACPI_FUNCTION_TRACE((char *)(uintptr_t)__func__);
+    ACPI_SERIAL_ASSERT(powerres);
+
+    if (consumer == NULL)
+	return_ACPI_STATUS (AE_NOT_FOUND);
+
+    for (int state = ACPI_STATE_D0; state <= ACPI_STATE_D3_HOT; state++) {
+	pc->ac_prx[state].prx_has = false;
+	pc->ac_prx[state].prx_count = 0;
+	pc->ac_prx[state].prx_deps = NULL;
+
+	reslist_name = reslist_names[state - ACPI_STATE_D0];
+	if (ACPI_FAILURE(AcpiGetHandle(consumer, reslist_name, &reslist_handle)))
+	    continue;
+
+	reslist.Pointer = NULL;
+	reslist.Length = ACPI_ALLOCATE_BUFFER;
+	status = AcpiEvaluateObjectTyped(reslist_handle, NULL, NULL, &reslist,
+					 ACPI_TYPE_PACKAGE);
+	if (ACPI_FAILURE(status) || reslist.Pointer == NULL)
+	    continue;
+
+	reslist_object = (ACPI_OBJECT *)reslist.Pointer;
+	pc->ac_prx[state].prx_has = true;
+	pc->ac_prx[state].prx_count = reslist_object->Package.Count;
+
+	if (reslist_object->Package.Count == 0)
+	    continue;
+
+	pc->ac_prx[state].prx_deps = malloc(sizeof(*pc->ac_prx[state].prx_deps),
+					    M_ACPIPWR, M_NOWAIT);
+	if (pc->ac_prx[state].prx_deps == NULL) {
+	    AcpiOsFree(reslist_object);
+	    return_ACPI_STATUS (AE_NO_MEMORY);
+	}
+
+	for (size_t i = 0; i < reslist_object->Package.Count; i++) {
+	    dep = &reslist_object->Package.Elements[i];
+	    res = dep->Reference.Handle;
+	    pc->ac_prx[state].prx_deps[i] = res;
+
+	    /* It's fine to attempt to register the same resource twice. */
+	    acpi_pwr_register_resource(res);
+	}
+	AcpiOsFree(reslist_object);
+    }
+
+    return_ACPI_STATUS (AE_OK);
+}
+
+/*
  * Register a power consumer.  
  *
  * It's OK to call this if we already know about the consumer.
@@ -244,6 +321,12 @@ acpi_pwr_register_consumer(ACPI_HANDLE consumer)
     TAILQ_INSERT_HEAD(&acpi_powerconsumers, pc, ac_link);
     TAILQ_INIT(&pc->ac_references);
     pc->ac_consumer = consumer;
+
+    /*
+     * Get all its power resource dependencies, if it has _PRx.  We do this now
+     * as an opportunity to populate the acpi_powerresources queue.
+     */
+    acpi_pwr_get_power_resources(consumer, pc);
 
     /* XXX we should try to find its current state */
     pc->ac_state = ACPI_STATE_UNKNOWN;
@@ -279,6 +362,8 @@ acpi_pwr_deregister_consumer(ACPI_HANDLE consumer)
 
     /* Pull the consumer off the list and free it */
     TAILQ_REMOVE(&acpi_powerconsumers, pc, ac_link);
+    for (size_t i = 0; i < sizeof(pc->ac_prx) / sizeof(*pc->ac_prx); i++)
+	free(pc->ac_prx[i].prx_deps, M_ACPIPWR);
     free(pc, M_ACPIPWR);
 
     ACPI_DEBUG_PRINT((ACPI_DB_OBJECTS, "deregistered power consumer %s\n",
