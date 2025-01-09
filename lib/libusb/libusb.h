@@ -502,6 +502,7 @@ int	libusb_open(libusb_device * dev, libusb_device_handle ** devh);
 libusb_device_handle *libusb_open_device_with_vid_pid(libusb_context * ctx, uint16_t vendor_id, uint16_t product_id);
 void	libusb_close(libusb_device_handle * devh);
 libusb_device *libusb_get_device(libusb_device_handle * devh);
+libusb_device *libusb_get_parent(libusb_device * dev);
 int	libusb_get_configuration(libusb_device_handle * devh, int *config);
 int	libusb_set_configuration(libusb_device_handle * devh, int configuration);
 int	libusb_claim_interface(libusb_device_handle * devh, int interface_number);
@@ -516,7 +517,6 @@ int 	libusb_detach_kernel_driver(libusb_device_handle * devh, int interface);
 int 	libusb_attach_kernel_driver(libusb_device_handle * devh, int interface);
 int	libusb_set_auto_detach_kernel_driver(libusb_device_handle *dev, int enable);
 int	libusb_set_interface_alt_setting(libusb_device_handle * devh, int interface_number, int alternate_setting);
-libusb_device *libusb_get_parent(libusb_device * dev);
 
 /* USB Descriptors */
 
