@@ -58,6 +58,7 @@ dev/acpica/acpi_pcib_acpi.c	optional	acpi pci
 dev/acpica/acpi_pcib_pci.c	optional	acpi pci
 dev/acpica/acpi_pxm.c		optional	acpi
 dev/acpica/acpi_timer.c		optional	acpi
+dev/amdpmc/amdpmc.c		optional	amdpmc pci
 dev/amdsbwd/amdsbwd.c		optional	amdsbwd
 dev/amdsmn/amdsmn.c		optional	amdsmn | amdtemp
 dev/amdtemp/amdtemp.c		optional	amdtemp
