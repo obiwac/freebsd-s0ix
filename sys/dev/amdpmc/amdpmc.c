@@ -29,6 +29,16 @@
 #define SMU_REG_OFF		0x10000
 #define SMU_FW_VERSION		0x0
 
+#define SMU_REG_MESSAGE		0x538
+#define SMU_REG_RESPONSE	0x980
+#define SMU_REG_ARGUMENT	0x9BC
+
+#define SMU_RES_OK		0x01
+#define SMU_RES_REJECT_BUSY	0xFC
+#define SMU_RES_REJECT_PREREQ	0xFD
+#define SMU_RES_UNKNOWN		0xFE
+#define SMU_RES_FAILED		0xFF
+
 /*
  * TODO These are in common with amdtemp; should we find a way to factor these
  * out?  Also there are way more of these.  I couldn't find a centralized place
@@ -106,7 +116,11 @@ amdpmc_attach(device_t dev)
 	bus_space_handle_t smu, reg;
 	uint32_t fw_vers;
 
-	/* Find physical base address for SMU. */
+	/*
+	 * Find physical base address for SMU.
+	 * XXX I am a little confused about the masks here.  I'm just copying
+	 * what Linux does in the amd-pmc driver to get the base address.
+	 */
 	pci_write_config(dev, SMU_INDEX_ADDRESS, SMU_PHYSBASE_ADDR_LO, 4);
 	physbase_addr_lo = pci_read_config(dev, SMU_INDEX_DATA, 4) & 0xFFF00000;
 
@@ -141,6 +155,19 @@ amdpmc_attach(device_t dev)
 	/* TODO (not working) Read basic SMU info. */
 	fw_vers = bus_space_read_4(sc->bus_tag, smu, SMU_FW_VERSION);
 	device_printf(dev, "SMU firmware version: 0x%08x\n", fw_vers);
+
+	device_printf(dev, "SMU message reg: %08x\n",
+	    bus_space_read_4(sc->bus_tag, reg, SMU_REG_MESSAGE));
+	device_printf(dev, "SMU response reg: %08x\n",
+	    bus_space_read_4(sc->bus_tag, reg, SMU_REG_RESPONSE));
+	device_printf(dev, "SMU argument reg: %08x\n",
+	    bus_space_read_4(sc->bus_tag, reg, SMU_REG_ARGUMENT));
+
+	/* See https://lore.kernel.org/all/8ff4fcb8-36c9-f9e4-d05f-730e5379ec9c@redhat.com */
+	if (bus_space_read_4(sc->bus_tag, reg, SMU_REG_RESPONSE) == SMU_RES_OK)
+		device_printf(dev, "SMU is ready\n");
+	else
+		device_printf(dev, "SMU is not ready\n");
 
 	return (0);
 }
