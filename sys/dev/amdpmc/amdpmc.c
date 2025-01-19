@@ -7,18 +7,27 @@
  * under sponsorship from the FreeBSD Foundation.
  */
 
+/* TODO Should this be called amdsmu instead? */
+
 #include <sys/param.h>
 #include <sys/bus.h>
 #include <sys/kernel.h>
 #include <sys/module.h>
+#include <sys/rman.h>
+
+#include <machine/bus.h>
 
 #include <dev/pci/pcivar.h>
 
 #define SMU_INDEX_ADDRESS	0xB8
 #define SMU_INDEX_DATA		0xBC
 
-#define SMU_BASE_ADDR_LO	0x13B102E8
-#define SMU_BASE_ADDR_HI	0x13B102EC
+#define SMU_PHYSBASE_ADDR_LO	0x13B102E8
+#define SMU_PHYSBASE_ADDR_HI	0x13B102EC
+
+#define SMU_MEM_SIZE		0x1000
+#define SMU_REG_OFF		0x10000
+#define SMU_FW_VERSION		0x0
 
 /*
  * TODO These are in common with amdtemp; should we find a way to factor these
@@ -40,6 +49,8 @@ static const struct amdpmc_product {
 };
 
 struct amdpmc_softc {
+	struct resource		*res;
+	bus_space_tag_t 	bus_tag;
 };
 
 static bool
@@ -77,31 +88,82 @@ amdpmc_identify(driver_t *driver, device_t parent)
 static int
 amdpmc_probe(device_t dev)
 {
-	uint32_t base_addr_lo, base_addr_hi;
-	uint64_t base_addr;
 
 	if (resource_disabled("amdpmc", 0))
 		return (ENXIO);
 	if (!amdpmc_match(device_get_parent(dev), NULL))
 		return (ENXIO);
-
-	pci_write_config(dev, SMU_INDEX_ADDRESS, SMU_BASE_ADDR_LO, 4);
-	base_addr_lo = pci_read_config(dev, SMU_INDEX_DATA, 4);
-
-	pci_write_config(dev, SMU_INDEX_ADDRESS, SMU_BASE_ADDR_HI, 4);
-	base_addr_hi = pci_read_config(dev, SMU_INDEX_DATA, 4);
-
-	base_addr = (uint64_t)base_addr_hi << 32 | base_addr_lo;
-	device_printf(dev, "PMC base addr: 0x%lx\n", base_addr);
-
 	return (BUS_PROBE_GENERIC);
+}
+
+static int
+amdpmc_attach(device_t dev)
+{
+	struct amdpmc_softc *sc = device_get_softc(dev);
+	uint32_t physbase_addr_lo, physbase_addr_hi;
+	uint64_t physbase_addr;
+	int rid = 0;
+	bus_space_handle_t smu, reg;
+	uint32_t fw_vers;
+
+	/* Find physical base address for SMU. */
+	pci_write_config(dev, SMU_INDEX_ADDRESS, SMU_PHYSBASE_ADDR_LO, 4);
+	physbase_addr_lo = pci_read_config(dev, SMU_INDEX_DATA, 4) & 0xFFF00000;
+
+	pci_write_config(dev, SMU_INDEX_ADDRESS, SMU_PHYSBASE_ADDR_HI, 4);
+	physbase_addr_hi = pci_read_config(dev, SMU_INDEX_DATA, 4) & 0x0000FFFF;
+
+	physbase_addr = (uint64_t)physbase_addr_hi << 32 | physbase_addr_lo;
+	device_printf(dev, "SMU physical base address: 0x%016lx\n", physbase_addr);
+
+	/* Map memory for SMU and its registers. */
+	sc->res = bus_alloc_resource_any(dev, SYS_RES_MEMORY, &rid, RF_ACTIVE);
+	if (sc->res == NULL) {
+		device_printf(dev, "could not allocate resource\n");
+		return (ENXIO);
+	}
+
+	sc->bus_tag = rman_get_bustag(sc->res);
+
+	if (bus_space_map(sc->bus_tag, physbase_addr,
+	    SMU_MEM_SIZE, 0, &smu) != 0) {
+		device_printf(dev, "could not map bus space for SMU\n");
+		bus_release_resource(dev, SYS_RES_MEMORY, rid, sc->res);
+		return (ENXIO);
+	}
+	if (bus_space_map(sc->bus_tag, physbase_addr + SMU_REG_OFF,
+	    SMU_MEM_SIZE, 0, &reg) != 0) {
+		device_printf(dev, "could not map bus space for SMU regs\n");
+		bus_release_resource(dev, SYS_RES_MEMORY, rid, sc->res);
+		return (ENXIO);
+	}
+
+	/* TODO (not working) Read basic SMU info. */
+	fw_vers = bus_space_read_4(sc->bus_tag, smu, SMU_FW_VERSION);
+	device_printf(dev, "SMU firmware version: 0x%08x\n", fw_vers);
+
+	return (0);
+}
+
+static int
+amdpmc_detach(device_t dev)
+{
+	struct amdpmc_softc *sc = device_get_softc(dev);
+	int rid = 0;
+
+	if (sc->res != NULL) {
+		bus_release_resource(dev, SYS_RES_MEMORY, rid, sc->res);
+		sc->res = NULL;
+	}
+
+	return (0);
 }
 
 static device_method_t amdpmc_methods[] = {
 	DEVMETHOD(device_identify,	amdpmc_identify),
 	DEVMETHOD(device_probe,		amdpmc_probe),
-	// DEVMETHOD(device_attach,	amdpmc_attach),
-	// DEVMETHOD(device_detach,	amdpmc_detach),
+	DEVMETHOD(device_attach,	amdpmc_attach),
+	DEVMETHOD(device_detach,	amdpmc_detach),
 	DEVMETHOD_END
 };
 
