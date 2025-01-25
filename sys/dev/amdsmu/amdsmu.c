@@ -65,9 +65,10 @@ struct amdsmu_metrics {
 	uint64_t timein_s0i3_totaltime;
 	uint64_t timein_swdrips_lastcapture;
 	uint64_t timein_swdrips_totaltime;
+	/* This is for each IP block. */
 	uint64_t timecondition_notmet_lastcapture[32];
 	uint64_t timecondition_notmet_totaltime[32];
-};
+} __attribute__((packed));
 
 /*
  * TODO These are in common with amdtemp; should we find a way to factor these
@@ -256,6 +257,48 @@ amdsmu_init_metrics(device_t dev)
 	sc->has_metrics = true;
 }
 
+static void
+amdsmu_dump_metrics(device_t dev)
+{
+	struct amdsmu_softc	*sc = device_get_softc(dev);
+	struct amdsmu_metrics	metrics;
+
+	if (!sc->has_metrics) {
+		device_printf(dev, "can't dump metrics\n");
+		return;
+	}
+	if (amdsmu_cmd(dev, SMU_MSG_LOG_DUMP_DATA, 0, NULL) != 0) {
+		device_printf(dev, "failed to dump metrics\n");
+		return;
+	}
+
+	bus_space_read_region_4(sc->bus_tag, sc->metrics_space, 0,
+	    (uint32_t *)&metrics, sizeof(metrics) / sizeof(uint32_t));
+
+	device_printf(dev, "SMU metrics:\n");
+	device_printf(dev, "  table_version: %d\n", metrics.table_version);
+	device_printf(dev, "  hint_count: %d\n", metrics.hint_count);
+	device_printf(dev, "  s0i3_last_entry_status: %d\n",
+	    metrics.s0i3_last_entry_status);
+	device_printf(dev, "  timein_s0i2: %d\n", metrics.timein_s0i2);
+	device_printf(dev, "  timeentering_s0i3_lastcapture: %ld\n",
+	    metrics.timeentering_s0i3_lastcapture);
+	device_printf(dev, "  timeentering_s0i3_totaltime: %ld\n",
+	    metrics.timeentering_s0i3_totaltime);
+	device_printf(dev, "  timeto_resume_to_os_lastcapture: %ld\n",
+	    metrics.timeto_resume_to_os_lastcapture);
+	device_printf(dev, "  timeto_resume_to_os_totaltime: %ld\n",
+	    metrics.timeto_resume_to_os_totaltime);
+	device_printf(dev, "  timein_s0i3_lastcapture: %ld\n",
+	    metrics.timein_s0i3_lastcapture);
+	device_printf(dev, "  timein_s0i3_totaltime: %ld\n",
+	    metrics.timein_s0i3_totaltime);
+	device_printf(dev, "  timein_swdrips_lastcapture: %ld\n",
+	    metrics.timein_swdrips_lastcapture);
+	device_printf(dev, "  timein_swdrips_totaltime: %ld\n",
+	    metrics.timein_swdrips_totaltime);
+}
+
 static int
 amdsmu_attach(device_t dev)
 {
@@ -303,6 +346,7 @@ amdsmu_attach(device_t dev)
 
 	/* Set up for getting metrics. */
 	amdsmu_init_metrics(dev);
+	amdsmu_dump_metrics(dev);
 
 	return (0);
 }
