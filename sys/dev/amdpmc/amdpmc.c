@@ -1,7 +1,7 @@
 /*
  * SPDX-License-Identifier: BSD-2-Clause
  *
- * Copyright (c) 2024 The FreeBSD Foundation
+ * Copyright (c) 2025 The FreeBSD Foundation
  *
  * This software was developed by Aymeric Wibo <obiwac@freebsd.org>
  * under sponsorship from the FreeBSD Foundation.
@@ -19,6 +19,9 @@
 
 #include <dev/pci/pcivar.h>
 
+#include <contrib/dev/acpica/include/acpi.h>
+#include <dev/acpica/acpivar.h>
+
 #define SMU_INDEX_ADDRESS	0xB8
 #define SMU_INDEX_DATA		0xBC
 
@@ -26,18 +29,33 @@
 #define SMU_PHYSBASE_ADDR_HI	0x13B102EC
 
 #define SMU_MEM_SIZE		0x1000
-#define SMU_REG_OFF		0x10000
-#define SMU_FW_VERSION		0x0
+#define SMU_REG_SPACE_OFF	0x10000
 
 #define SMU_REG_MESSAGE		0x538
 #define SMU_REG_RESPONSE	0x980
 #define SMU_REG_ARGUMENT	0x9BC
 
-#define SMU_RES_OK		0x01
-#define SMU_RES_REJECT_BUSY	0xFC
-#define SMU_RES_REJECT_PREREQ	0xFD
-#define SMU_RES_UNKNOWN		0xFE
-#define SMU_RES_FAILED		0xFF
+enum amdpmc_smu_res {
+	SMU_RES_WAIT		= 0x00,
+	SMU_RES_OK		= 0x01,
+	SMU_RES_REJECT_BUSY	= 0xFC,
+	SMU_RES_REJECT_PREREQ	= 0xFD,
+	SMU_RES_UNKNOWN		= 0xFE,
+	SMU_RES_FAILED		= 0xFF,
+};
+
+#define SMU_RES_READ_PERIOD_US	50
+#define SMU_RES_READ_MAX	20000
+
+enum amdpmc_smu_msg {
+	SMU_MSG_GETSMUVERSION		= 0x02,
+	SMU_MSG_LOG_GETDRAM_ADDR_HI	= 0x04,
+	SMU_MSG_LOG_GETDRAM_ADDR_LO	= 0x05,
+	SMU_MSG_LOG_START		= 0x06,
+	SMU_MSG_LOG_RESET		= 0x07,
+	SMU_MSG_LOG_DUMP_DATA		= 0x08,
+	SMU_MSG_GET_SUP_CONSTRAINTS	= 0x09,
+};
 
 /*
  * TODO These are in common with amdtemp; should we find a way to factor these
@@ -61,6 +79,9 @@ static const struct amdpmc_product {
 struct amdpmc_softc {
 	struct resource		*res;
 	bus_space_tag_t 	bus_tag;
+
+	bus_space_handle_t	smu_space;
+	bus_space_handle_t	reg_space;
 };
 
 static bool
@@ -106,6 +127,87 @@ amdpmc_probe(device_t dev)
 	return (BUS_PROBE_GENERIC);
 }
 
+static enum amdpmc_smu_res
+amdpmc_wait_res(device_t dev)
+{
+	struct amdpmc_softc	*sc = device_get_softc(dev);
+	enum amdpmc_smu_res	res;
+
+	/* TODO Remove comment?
+	 * To know whether the SMU is ready to accept commands, we must wait
+	 * for the response register to contain "1" (SMU_RES_OK).
+	 * See https://lore.kernel.org/all/8ff4fcb8-36c9-f9e4-d05f-730e5379ec9c@redhat.com
+	 */
+
+	for (size_t i = 0; i < SMU_RES_READ_MAX; i++) {
+		res = bus_space_read_4(sc->bus_tag, sc->reg_space,
+		    SMU_REG_RESPONSE);
+		if (res != SMU_RES_WAIT)
+			return (res);
+		pause_sbt("amdpmc", ustosbt(SMU_RES_READ_PERIOD_US), 0,
+		    C_HARDCLOCK);
+	}
+	device_printf(dev, "timed out waiting for response from SMU\n");
+	return SMU_RES_WAIT;
+}
+
+static int
+amdpmc_cmd(device_t dev, uint32_t msg, uint32_t arg, uint32_t *ret)
+{
+	struct amdpmc_softc	*sc = device_get_softc(dev);
+	enum amdpmc_smu_res	res;
+
+	/* Wait for SMU to be ready. */
+	if (amdpmc_wait_res(dev) == SMU_RES_WAIT)
+		return (ETIMEDOUT);
+
+	/* Write out command to registers. */
+	bus_space_write_4(sc->bus_tag, sc->reg_space, SMU_REG_RESPONSE,
+	    SMU_RES_WAIT);
+	bus_space_write_4(sc->bus_tag, sc->reg_space, SMU_REG_MESSAGE, msg);
+	bus_space_write_4(sc->bus_tag, sc->reg_space, SMU_REG_ARGUMENT, arg);
+
+	res = amdpmc_wait_res(dev);
+
+	switch (res) {
+	case SMU_RES_WAIT:
+		return (ETIMEDOUT);
+	case SMU_RES_OK:
+		if (ret != NULL)
+			*ret = bus_space_read_4(sc->bus_tag, sc->reg_space,
+			    SMU_REG_ARGUMENT);
+		return (0);
+	case SMU_RES_REJECT_BUSY:
+		device_printf(dev, "SMU is busy\n");
+		return (EBUSY);
+	case SMU_RES_REJECT_PREREQ:
+	case SMU_RES_UNKNOWN:
+	case SMU_RES_FAILED:
+		device_printf(dev, "SMU error: %02x\n", res);
+	}
+
+	return (EINVAL);
+}
+
+static void
+amdpmc_print_vers(device_t dev)
+{
+	uint32_t	fw_vers;
+	uint8_t		smu_program;
+	uint8_t		smu_maj, smu_min, smu_rev;
+
+	if (amdpmc_cmd(dev, SMU_MSG_GETSMUVERSION, 0, &fw_vers) != 0) {
+		device_printf(dev, "failed to get SMU version\n");
+		return;
+	}
+	smu_program = (fw_vers >> 24) & 0xFF;
+	smu_maj = (fw_vers >> 16) & 0xFF;
+	smu_min = (fw_vers >> 8) & 0xFF;
+	smu_rev = fw_vers & 0xFF;
+	device_printf(dev, "SMU version: %d.%d.%d (program %d)\n",
+	    smu_maj, smu_min, smu_rev, smu_program);
+}
+
 static int
 amdpmc_attach(device_t dev)
 {
@@ -113,8 +215,7 @@ amdpmc_attach(device_t dev)
 	uint32_t physbase_addr_lo, physbase_addr_hi;
 	uint64_t physbase_addr;
 	int rid = 0;
-	bus_space_handle_t smu, reg;
-	uint32_t fw_vers;
+	uint32_t log_addr_lo, log_addr_hi;
 
 	/*
 	 * Find physical base address for SMU.
@@ -128,7 +229,6 @@ amdpmc_attach(device_t dev)
 	physbase_addr_hi = pci_read_config(dev, SMU_INDEX_DATA, 4) & 0x0000FFFF;
 
 	physbase_addr = (uint64_t)physbase_addr_hi << 32 | physbase_addr_lo;
-	device_printf(dev, "SMU physical base address: 0x%016lx\n", physbase_addr);
 
 	/* Map memory for SMU and its registers. */
 	sc->res = bus_alloc_resource_any(dev, SYS_RES_MEMORY, &rid, RF_ACTIVE);
@@ -140,34 +240,34 @@ amdpmc_attach(device_t dev)
 	sc->bus_tag = rman_get_bustag(sc->res);
 
 	if (bus_space_map(sc->bus_tag, physbase_addr,
-	    SMU_MEM_SIZE, 0, &smu) != 0) {
+	    SMU_MEM_SIZE, 0, &sc->smu_space) != 0) {
 		device_printf(dev, "could not map bus space for SMU\n");
 		bus_release_resource(dev, SYS_RES_MEMORY, rid, sc->res);
 		return (ENXIO);
 	}
-	if (bus_space_map(sc->bus_tag, physbase_addr + SMU_REG_OFF,
-	    SMU_MEM_SIZE, 0, &reg) != 0) {
+	if (bus_space_map(sc->bus_tag, physbase_addr + SMU_REG_SPACE_OFF,
+	    SMU_MEM_SIZE, 0, &sc->reg_space) != 0) {
 		device_printf(dev, "could not map bus space for SMU regs\n");
 		bus_release_resource(dev, SYS_RES_MEMORY, rid, sc->res);
 		return (ENXIO);
 	}
 
-	/* TODO (not working) Read basic SMU info. */
-	fw_vers = bus_space_read_4(sc->bus_tag, smu, SMU_FW_VERSION);
-	device_printf(dev, "SMU firmware version: 0x%08x\n", fw_vers);
+	amdpmc_print_vers(dev);
 
-	device_printf(dev, "SMU message reg: %08x\n",
-	    bus_space_read_4(sc->bus_tag, reg, SMU_REG_MESSAGE));
-	device_printf(dev, "SMU response reg: %08x\n",
-	    bus_space_read_4(sc->bus_tag, reg, SMU_REG_RESPONSE));
-	device_printf(dev, "SMU argument reg: %08x\n",
-	    bus_space_read_4(sc->bus_tag, reg, SMU_REG_ARGUMENT));
+	/* Setup SMU logging. */
+	amdpmc_cmd(dev, SMU_MSG_LOG_GETDRAM_ADDR_LO, 0, &log_addr_lo);
+	amdpmc_cmd(dev, SMU_MSG_LOG_GETDRAM_ADDR_HI, 0, &log_addr_hi);
 
-	/* See https://lore.kernel.org/all/8ff4fcb8-36c9-f9e4-d05f-730e5379ec9c@redhat.com */
-	if (bus_space_read_4(sc->bus_tag, reg, SMU_REG_RESPONSE) == SMU_RES_OK)
-		device_printf(dev, "SMU is ready\n");
-	else
-		device_printf(dev, "SMU is not ready\n");
+	amdpmc_cmd(dev, SMU_MSG_LOG_RESET, 0, NULL);
+	amdpmc_cmd(dev, SMU_MSG_LOG_START, 0, NULL);
+
+	printf("SMU log addr: %08x - %08x\n", log_addr_lo, log_addr_hi);
+
+	// TODO acpi_amdpmc_enter/exit hooks.
+	// These can then either be called in acpi_spmc or in ACPI itself, I don't know yet (probably ACPI itself).
+
+	struct acpi_softc *acpi_sc = acpi_device_get_parent_softc(dev);
+	printf("acpi_sc: %p\n", acpi_sc);
 
 	return (0);
 }
