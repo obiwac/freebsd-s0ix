@@ -14,11 +14,7 @@
 #include <sys/rman.h>
 
 #include <machine/bus.h>
-
 #include <dev/pci/pcivar.h>
-
-#include <contrib/dev/acpica/include/acpi.h>
-#include <dev/acpica/acpivar.h>
 
 #define SMU_INDEX_ADDRESS	0xB8
 #define SMU_INDEX_DATA		0xBC
@@ -215,7 +211,6 @@ amdsmu_attach(device_t dev)
 	uint32_t physbase_addr_lo, physbase_addr_hi;
 	uint64_t physbase_addr;
 	int rid = 0;
-	uint32_t log_addr_lo, log_addr_hi;
 
 	/*
 	 * Find physical base address for SMU.
@@ -253,22 +248,6 @@ amdsmu_attach(device_t dev)
 	}
 
 	amdsmu_print_vers(dev);
-
-	/* Setup SMU logging. */
-	amdsmu_cmd(dev, SMU_MSG_LOG_GETDRAM_ADDR_LO, 0, &log_addr_lo);
-	amdsmu_cmd(dev, SMU_MSG_LOG_GETDRAM_ADDR_HI, 0, &log_addr_hi);
-
-	amdsmu_cmd(dev, SMU_MSG_LOG_RESET, 0, NULL);
-	amdsmu_cmd(dev, SMU_MSG_LOG_START, 0, NULL);
-
-	printf("SMU log addr: %08x - %08x\n", log_addr_lo, log_addr_hi);
-
-	// TODO acpi_amdsmu_enter/exit hooks.
-	// These can then either be called in acpi_spmc or in ACPI itself, I don't know yet (probably ACPI itself).
-
-	struct acpi_softc *acpi_sc = acpi_device_get_parent_softc(dev);
-	printf("acpi_sc: %p\n", acpi_sc);
-
 	return (0);
 }
 
