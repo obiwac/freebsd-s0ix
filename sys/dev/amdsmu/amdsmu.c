@@ -258,6 +258,7 @@ amdsmu_get_ip_blocks(device_t dev)
 {
 	struct amdsmu_softc	*sc = device_get_softc(dev);
 	const uint16_t		deviceid = pci_get_device(dev);
+	char			sysctl_name[32], sysctl_descr[32];
 
 	/* Get IP block count. */
 	switch (deviceid) {
@@ -280,12 +281,23 @@ amdsmu_get_ip_blocks(device_t dev)
 		device_printf(dev, "failed to get IP blocks\n");
 		return;
 	}
-	device_printf(dev, "AMD IP blocks: ");
+	device_printf(dev, "Active IP blocks: ");
 	for (size_t i = 0; i < sc->ip_block_count; i++) {
 		if ((sc->ip_blocks & (1 << i)) == 0)
 			continue;
 		printf("%s%s", amdsmu_ip_blocks[i],
 		    i + 1 < sc->ip_block_count ? " " : "\n");
+	}
+
+	/* Add these IP blocks to sysctl. */
+	for (size_t i = 0; i < sc->ip_block_count; i++) {
+		snprintf(sysctl_name, sizeof(sysctl_name), "ip_block_%s",
+		    amdsmu_ip_blocks[i]);
+		snprintf(sysctl_descr, sizeof(sysctl_descr),
+		    "IP block %s is active", amdsmu_ip_blocks[i]);
+		SYSCTL_ADD_BOOL(sc->sysctlctx, SYSCTL_CHILDREN(sc->sysctlnode),
+		    OID_AUTO, sysctl_name, CTLFLAG_RD, NULL,
+		    (sc->ip_blocks & (1 << i)) ? true : false, sysctl_descr);
 	}
 }
 
