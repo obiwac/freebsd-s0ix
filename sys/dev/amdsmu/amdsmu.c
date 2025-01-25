@@ -89,12 +89,21 @@ static const struct amdsmu_product {
 	{ VENDORID_AMD,	CPUID_AMD_STRIX_POINT },
 };
 
+static const char *const amdsmu_ip_blocks[] = { "DISPLAY", "CPU", "GFX", "VDD",
+    "ACP", "VCN", "ISP", "NBIO", "DF", "USB3_0", "USB3_1", "LAPIC", "USB3_2",
+    "USB3_3", "USB3_4", "USB4_0", "USB4_1", "MPM", "JPEG", "IPU", "UMSCH",
+    "VPE" };
+
 struct amdsmu_softc {
 	struct resource		*res;
 	bus_space_tag_t 	bus_tag;
 
 	bus_space_handle_t	smu_space;
 	bus_space_handle_t	reg_space;
+
+	size_t			ip_block_count;
+	uint32_t		ip_blocks;
+
 	bus_space_handle_t	metrics_space;
 	bool			has_metrics;
 };
@@ -226,6 +235,42 @@ amdsmu_print_vers(device_t dev)
 }
 
 static void
+amdsmu_get_ip_blocks(device_t dev)
+{
+	struct amdsmu_softc	*sc = device_get_softc(dev);
+	const uint16_t		deviceid = pci_get_device(dev);
+
+	/* Get IP block count. */
+	switch (deviceid) {
+	case CPUID_AMD_REMBRANDT:
+		sc->ip_block_count = 12;
+		break;
+	case CPUID_AMD_PHOENIX:
+		sc->ip_block_count = 21;
+		break;
+	/* TODO How many IP blocks does Strix Point (and the others) have? */
+	case CPUID_AMD_STRIX_POINT:
+	default:
+		sc->ip_block_count = nitems(amdsmu_ip_blocks);
+	}
+	KASSERT(sc->ip_block_count <= nitems(amdsmu_ip_blocks),
+	    ("too many IP blocks for array"));
+
+	/* Get and print out IP blocks. */
+	if (amdsmu_cmd(dev, SMU_MSG_GET_SUP_CONSTRAINTS, 0, &sc->ip_blocks) != 0) {
+		device_printf(dev, "failed to get IP blocks\n");
+		return;
+	}
+	device_printf(dev, "AMD IP blocks: ");
+	for (size_t i = 0; i < sc->ip_block_count; i++) {
+		if ((sc->ip_blocks & (1 << i)) == 0)
+			continue;
+		printf("%s%s", amdsmu_ip_blocks[i],
+		    i + 1 < sc->ip_block_count ? " " : "\n");
+	}
+}
+
+static void
 amdsmu_init_metrics(device_t dev)
 {
 	struct amdsmu_softc	*sc = device_get_softc(dev);
@@ -343,6 +388,9 @@ amdsmu_attach(device_t dev)
 	}
 
 	amdsmu_print_vers(dev);
+
+	/* Get IP blocks. */
+	amdsmu_get_ip_blocks(dev);
 
 	/* Set up for getting metrics. */
 	amdsmu_init_metrics(dev);
