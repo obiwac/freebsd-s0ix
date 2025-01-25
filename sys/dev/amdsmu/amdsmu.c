@@ -105,14 +105,17 @@ struct amdsmu_softc {
 	bus_space_handle_t	smu_space;
 	bus_space_handle_t	reg_space;
 
+	bool			added_vers_sysctl;
 	uint8_t			smu_program;
 	uint8_t			smu_maj, smu_min, smu_rev;
 
 	size_t			ip_block_count;
 	uint32_t		ip_blocks;
 
-	bus_space_handle_t	metrics_space;
 	bool			has_metrics;
+	bus_space_handle_t	metrics_space;
+	bool			added_metrics_sysctl;
+	struct amdsmu_metrics	metrics;
 };
 
 static bool
@@ -240,6 +243,10 @@ amdsmu_get_vers(device_t dev)
 	    sc->smu_maj, sc->smu_min, sc->smu_rev, sc->smu_program);
 
 	/* Add sysctl nodes for SMU version. */
+	if (sc->added_vers_sysctl)
+		return;
+	sc->added_vers_sysctl = true;
+
 	SYSCTL_ADD_U8(sc->sysctlctx, SYSCTL_CHILDREN(sc->sysctlnode), OID_AUTO,
 	    "program", CTLFLAG_RD, &sc->smu_program, 0, "SMU program number");
 	SYSCTL_ADD_U8(sc->sysctlctx, SYSCTL_CHILDREN(sc->sysctlnode), OID_AUTO,
@@ -289,7 +296,10 @@ amdsmu_get_ip_blocks(device_t dev)
 		    i + 1 < sc->ip_block_count ? " " : "\n");
 	}
 
-	/* Add these IP blocks to sysctl. */
+	/*
+	 * Add these IP blocks to sysctl.
+	 * TODO This won't work if we call amdsmu_get_ip_blocks multiple times.
+	 */
 	for (size_t i = 0; i < sc->ip_block_count; i++) {
 		snprintf(sysctl_name, sizeof(sysctl_name), "ip_block_%s",
 		    amdsmu_ip_blocks[i]);
@@ -337,7 +347,7 @@ static void
 amdsmu_dump_metrics(device_t dev)
 {
 	struct amdsmu_softc	*sc = device_get_softc(dev);
-	struct amdsmu_metrics	metrics;
+	struct sysctl_oid	*node;
 
 	if (!sc->has_metrics) {
 		device_printf(dev, "can't dump metrics\n");
@@ -347,32 +357,71 @@ amdsmu_dump_metrics(device_t dev)
 		device_printf(dev, "failed to dump metrics\n");
 		return;
 	}
-
 	bus_space_read_region_4(sc->bus_tag, sc->metrics_space, 0,
-	    (uint32_t *)&metrics, sizeof(metrics) / sizeof(uint32_t));
+	    (uint32_t *)&sc->metrics, sizeof(sc->metrics) / sizeof(uint32_t));
 
-	device_printf(dev, "SMU metrics:\n");
-	device_printf(dev, "  table_version: %d\n", metrics.table_version);
-	device_printf(dev, "  hint_count: %d\n", metrics.hint_count);
-	device_printf(dev, "  s0i3_last_entry_status: %d\n",
-	    metrics.s0i3_last_entry_status);
-	device_printf(dev, "  timein_s0i2: %d\n", metrics.timein_s0i2);
-	device_printf(dev, "  timeentering_s0i3_lastcapture: %ld\n",
-	    metrics.timeentering_s0i3_lastcapture);
-	device_printf(dev, "  timeentering_s0i3_totaltime: %ld\n",
-	    metrics.timeentering_s0i3_totaltime);
-	device_printf(dev, "  timeto_resume_to_os_lastcapture: %ld\n",
-	    metrics.timeto_resume_to_os_lastcapture);
-	device_printf(dev, "  timeto_resume_to_os_totaltime: %ld\n",
-	    metrics.timeto_resume_to_os_totaltime);
-	device_printf(dev, "  timein_s0i3_lastcapture: %ld\n",
-	    metrics.timein_s0i3_lastcapture);
-	device_printf(dev, "  timein_s0i3_totaltime: %ld\n",
-	    metrics.timein_s0i3_totaltime);
-	device_printf(dev, "  timein_swdrips_lastcapture: %ld\n",
-	    metrics.timein_swdrips_lastcapture);
-	device_printf(dev, "  timein_swdrips_totaltime: %ld\n",
-	    metrics.timein_swdrips_totaltime);
+	/* Add sysctl nodes for metrics. */
+	if (sc->added_metrics_sysctl)
+		return;
+	sc->added_metrics_sysctl = true;
+
+	node = SYSCTL_ADD_NODE(sc->sysctlctx, SYSCTL_CHILDREN(sc->sysctlnode),
+	    OID_AUTO, "metrics", CTLFLAG_RD, NULL, "SMU metrics");
+	if (node == NULL) {
+		device_printf(dev, "could not add sysctl node for metrics\n");
+		return;
+	}
+
+	SYSCTL_ADD_U32(sc->sysctlctx, SYSCTL_CHILDREN(node), OID_AUTO,
+	    "table_version", CTLFLAG_RD, &sc->metrics.table_version, 0,
+	    "SMU metrics table version");
+	SYSCTL_ADD_U32(sc->sysctlctx, SYSCTL_CHILDREN(node), OID_AUTO,
+	    "hint_count", CTLFLAG_RD, &sc->metrics.hint_count, 0,
+	    "SMU metrics hint count");
+	SYSCTL_ADD_U32(sc->sysctlctx, SYSCTL_CHILDREN(node), OID_AUTO,
+	    "s0i3_last_entry_status", CTLFLAG_RD,
+	    &sc->metrics.s0i3_last_entry_status, 0,
+	    "1 if last S0i3 entry was successful");
+	SYSCTL_ADD_U32(sc->sysctlctx, SYSCTL_CHILDREN(node), OID_AUTO,
+	    "timein_s0i2", CTLFLAG_RD, &sc->metrics.timein_s0i2, 0,
+	    "Time spent in S0i2 during last sleep (us)");
+	SYSCTL_ADD_U64(sc->sysctlctx, SYSCTL_CHILDREN(node), OID_AUTO,
+	    "timeentering_s0i3_lastcapture", CTLFLAG_RD,
+	    &sc->metrics.timeentering_s0i3_lastcapture, 0,
+	    "Time spent entering S0i3 during last sleep (us)");
+	SYSCTL_ADD_U64(sc->sysctlctx, SYSCTL_CHILDREN(node), OID_AUTO,
+	    "timeentering_s0i3_totaltime", CTLFLAG_RD,
+	    &sc->metrics.timeentering_s0i3_totaltime, 0,
+	    "Total time spent entering S0i3 (us)");
+	SYSCTL_ADD_U64(sc->sysctlctx, SYSCTL_CHILDREN(node), OID_AUTO,
+	    "timeto_resume_to_os_lastcapture", CTLFLAG_RD,
+	    &sc->metrics.timeto_resume_to_os_lastcapture, 0,
+	    "Time spent resuming from last sleep (us)");
+	SYSCTL_ADD_U64(sc->sysctlctx, SYSCTL_CHILDREN(node), OID_AUTO,
+	    "timeto_resume_to_os_totaltime", CTLFLAG_RD,
+	    &sc->metrics.timeto_resume_to_os_totaltime, 0,
+	    "Total time spent resuming from sleep (us)");
+	SYSCTL_ADD_U64(sc->sysctlctx, SYSCTL_CHILDREN(node), OID_AUTO,
+	    "timein_s0i3_lastcapture", CTLFLAG_RD,
+	    &sc->metrics.timein_s0i3_lastcapture, 0,
+	    "Time spent in S0i3 during last sleep (us)");
+	SYSCTL_ADD_U64(sc->sysctlctx, SYSCTL_CHILDREN(node), OID_AUTO,
+	    "timein_s0i3_totaltime", CTLFLAG_RD,
+	    &sc->metrics.timein_s0i3_totaltime, 0,
+	    "Total time spent in S0i3 (us)");
+	SYSCTL_ADD_U64(sc->sysctlctx, SYSCTL_CHILDREN(node), OID_AUTO,
+	    "timein_swdrips_lastcapture", CTLFLAG_RD,
+	    &sc->metrics.timein_swdrips_lastcapture, 0,
+	    "Time spent in software DRIPS (SW DRIPS) during last sleep (us)");
+	SYSCTL_ADD_U64(sc->sysctlctx, SYSCTL_CHILDREN(node), OID_AUTO,
+	    "timein_swdrips_totaltime", CTLFLAG_RD,
+	    &sc->metrics.timein_swdrips_totaltime, 0,
+	    "Total time spent in software DRIPS (SW DRIPS) (us)");
+	/*
+	 * TODO The other metrics are per IP block.  It would be nice if we
+	 * added a node for each IP block, and had the "time condition not met"
+	 * metrics (whatever those are for) as children of that node.
+	 */
 }
 
 static int
