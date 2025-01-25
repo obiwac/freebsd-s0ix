@@ -35,7 +35,7 @@
 #define SMU_REG_RESPONSE	0x980
 #define SMU_REG_ARGUMENT	0x9BC
 
-enum amdpmc_smu_res {
+enum amdsmu_res {
 	SMU_RES_WAIT		= 0x00,
 	SMU_RES_OK		= 0x01,
 	SMU_RES_REJECT_BUSY	= 0xFC,
@@ -47,7 +47,7 @@ enum amdpmc_smu_res {
 #define SMU_RES_READ_PERIOD_US	50
 #define SMU_RES_READ_MAX	20000
 
-enum amdpmc_smu_msg {
+enum amdsmu_msg {
 	SMU_MSG_GETSMUVERSION		= 0x02,
 	SMU_MSG_LOG_GETDRAM_ADDR_HI	= 0x04,
 	SMU_MSG_LOG_GETDRAM_ADDR_LO	= 0x05,
@@ -59,7 +59,7 @@ enum amdpmc_smu_msg {
 
 /*
  * TODO These are in common with amdtemp; should we find a way to factor these
- * out?  Also there are way more of these.  I couldn't find a centralized place
+ * out?  Also, there are way more of these.  I couldn't find a centralized place
  * which lists them though.
  */
 #define VENDORID_AMD		0x1022
@@ -67,16 +67,16 @@ enum amdpmc_smu_msg {
 #define CPUID_AMD_PHOENIX	0x14E8
 #define CPUID_AMD_STRIX_POINT	0x14A4
 
-static const struct amdpmc_product {
-	uint16_t	amdpmc_vendorid;
-	uint16_t	amdpmc_deviceid;
-} amdpmc_products[] = {
+static const struct amdsmu_product {
+	uint16_t	amdsmu_vendorid;
+	uint16_t	amdsmu_deviceid;
+} amdsmu_products[] = {
 	{ VENDORID_AMD,	CPUID_AMD_REMBRANDT },
 	{ VENDORID_AMD,	CPUID_AMD_PHOENIX },
 	{ VENDORID_AMD,	CPUID_AMD_STRIX_POINT },
 };
 
-struct amdpmc_softc {
+struct amdsmu_softc {
 	struct resource		*res;
 	bus_space_tag_t 	bus_tag;
 
@@ -85,16 +85,16 @@ struct amdpmc_softc {
 };
 
 static bool
-amdpmc_match(device_t dev, const struct amdpmc_product **product_out)
+amdsmu_match(device_t dev, const struct amdsmu_product **product_out)
 {
 	const uint16_t vendorid = pci_get_vendor(dev);
 	const uint16_t deviceid = pci_get_device(dev);
 
-	for (size_t i = 0; i < nitems(amdpmc_products); i++) {
-		const struct amdpmc_product *prod = &amdpmc_products[i];
+	for (size_t i = 0; i < nitems(amdsmu_products); i++) {
+		const struct amdsmu_product *prod = &amdsmu_products[i];
 
-		if (vendorid == prod->amdpmc_vendorid &&
-		    deviceid == prod->amdpmc_deviceid) {
+		if (vendorid == prod->amdsmu_vendorid &&
+		    deviceid == prod->amdsmu_deviceid) {
 			if (product_out != NULL)
 				*product_out = prod;
 			return (true);
@@ -104,34 +104,34 @@ amdpmc_match(device_t dev, const struct amdpmc_product **product_out)
 }
 
 static void
-amdpmc_identify(driver_t *driver, device_t parent)
+amdsmu_identify(driver_t *driver, device_t parent)
 {
 
-	if (device_find_child(parent, "amdpmc", -1) != NULL)
+	if (device_find_child(parent, "amdsmu", -1) != NULL)
 		return;
 
-	if (amdpmc_match(parent, NULL)) {
-		if (device_add_child(parent, "amdpmc", -1) == NULL)
-			device_printf(parent, "add amdpmc child failed\n");
+	if (amdsmu_match(parent, NULL)) {
+		if (device_add_child(parent, "amdsmu", -1) == NULL)
+			device_printf(parent, "add amdsmu child failed\n");
 	}
 }
 
 static int
-amdpmc_probe(device_t dev)
+amdsmu_probe(device_t dev)
 {
 
-	if (resource_disabled("amdpmc", 0))
+	if (resource_disabled("amdsmu", 0))
 		return (ENXIO);
-	if (!amdpmc_match(device_get_parent(dev), NULL))
+	if (!amdsmu_match(device_get_parent(dev), NULL))
 		return (ENXIO);
 	return (BUS_PROBE_GENERIC);
 }
 
-static enum amdpmc_smu_res
-amdpmc_wait_res(device_t dev)
+static enum amdsmu_res
+amdsmu_wait_res(device_t dev)
 {
-	struct amdpmc_softc	*sc = device_get_softc(dev);
-	enum amdpmc_smu_res	res;
+	struct amdsmu_softc	*sc = device_get_softc(dev);
+	enum amdsmu_res	res;
 
 	/* TODO Remove comment?
 	 * To know whether the SMU is ready to accept commands, we must wait
@@ -144,7 +144,7 @@ amdpmc_wait_res(device_t dev)
 		    SMU_REG_RESPONSE);
 		if (res != SMU_RES_WAIT)
 			return (res);
-		pause_sbt("amdpmc", ustosbt(SMU_RES_READ_PERIOD_US), 0,
+		pause_sbt("amdsmu", ustosbt(SMU_RES_READ_PERIOD_US), 0,
 		    C_HARDCLOCK);
 	}
 	device_printf(dev, "timed out waiting for response from SMU\n");
@@ -152,13 +152,13 @@ amdpmc_wait_res(device_t dev)
 }
 
 static int
-amdpmc_cmd(device_t dev, uint32_t msg, uint32_t arg, uint32_t *ret)
+amdsmu_cmd(device_t dev, uint32_t msg, uint32_t arg, uint32_t *ret)
 {
-	struct amdpmc_softc	*sc = device_get_softc(dev);
-	enum amdpmc_smu_res	res;
+	struct amdsmu_softc	*sc = device_get_softc(dev);
+	enum amdsmu_res	res;
 
 	/* Wait for SMU to be ready. */
-	if (amdpmc_wait_res(dev) == SMU_RES_WAIT)
+	if (amdsmu_wait_res(dev) == SMU_RES_WAIT)
 		return (ETIMEDOUT);
 
 	/* Write out command to registers. */
@@ -167,7 +167,7 @@ amdpmc_cmd(device_t dev, uint32_t msg, uint32_t arg, uint32_t *ret)
 	bus_space_write_4(sc->bus_tag, sc->reg_space, SMU_REG_MESSAGE, msg);
 	bus_space_write_4(sc->bus_tag, sc->reg_space, SMU_REG_ARGUMENT, arg);
 
-	res = amdpmc_wait_res(dev);
+	res = amdsmu_wait_res(dev);
 
 	switch (res) {
 	case SMU_RES_WAIT:
@@ -190,13 +190,13 @@ amdpmc_cmd(device_t dev, uint32_t msg, uint32_t arg, uint32_t *ret)
 }
 
 static void
-amdpmc_print_vers(device_t dev)
+amdsmu_print_vers(device_t dev)
 {
 	uint32_t	fw_vers;
 	uint8_t		smu_program;
 	uint8_t		smu_maj, smu_min, smu_rev;
 
-	if (amdpmc_cmd(dev, SMU_MSG_GETSMUVERSION, 0, &fw_vers) != 0) {
+	if (amdsmu_cmd(dev, SMU_MSG_GETSMUVERSION, 0, &fw_vers) != 0) {
 		device_printf(dev, "failed to get SMU version\n");
 		return;
 	}
@@ -209,9 +209,9 @@ amdpmc_print_vers(device_t dev)
 }
 
 static int
-amdpmc_attach(device_t dev)
+amdsmu_attach(device_t dev)
 {
-	struct amdpmc_softc *sc = device_get_softc(dev);
+	struct amdsmu_softc *sc = device_get_softc(dev);
 	uint32_t physbase_addr_lo, physbase_addr_hi;
 	uint64_t physbase_addr;
 	int rid = 0;
@@ -252,18 +252,18 @@ amdpmc_attach(device_t dev)
 		return (ENXIO);
 	}
 
-	amdpmc_print_vers(dev);
+	amdsmu_print_vers(dev);
 
 	/* Setup SMU logging. */
-	amdpmc_cmd(dev, SMU_MSG_LOG_GETDRAM_ADDR_LO, 0, &log_addr_lo);
-	amdpmc_cmd(dev, SMU_MSG_LOG_GETDRAM_ADDR_HI, 0, &log_addr_hi);
+	amdsmu_cmd(dev, SMU_MSG_LOG_GETDRAM_ADDR_LO, 0, &log_addr_lo);
+	amdsmu_cmd(dev, SMU_MSG_LOG_GETDRAM_ADDR_HI, 0, &log_addr_hi);
 
-	amdpmc_cmd(dev, SMU_MSG_LOG_RESET, 0, NULL);
-	amdpmc_cmd(dev, SMU_MSG_LOG_START, 0, NULL);
+	amdsmu_cmd(dev, SMU_MSG_LOG_RESET, 0, NULL);
+	amdsmu_cmd(dev, SMU_MSG_LOG_START, 0, NULL);
 
 	printf("SMU log addr: %08x - %08x\n", log_addr_lo, log_addr_hi);
 
-	// TODO acpi_amdpmc_enter/exit hooks.
+	// TODO acpi_amdsmu_enter/exit hooks.
 	// These can then either be called in acpi_spmc or in ACPI itself, I don't know yet (probably ACPI itself).
 
 	struct acpi_softc *acpi_sc = acpi_device_get_parent_softc(dev);
@@ -273,9 +273,9 @@ amdpmc_attach(device_t dev)
 }
 
 static int
-amdpmc_detach(device_t dev)
+amdsmu_detach(device_t dev)
 {
-	struct amdpmc_softc *sc = device_get_softc(dev);
+	struct amdsmu_softc *sc = device_get_softc(dev);
 	int rid = 0;
 
 	if (sc->res != NULL) {
@@ -286,22 +286,22 @@ amdpmc_detach(device_t dev)
 	return (0);
 }
 
-static device_method_t amdpmc_methods[] = {
-	DEVMETHOD(device_identify,	amdpmc_identify),
-	DEVMETHOD(device_probe,		amdpmc_probe),
-	DEVMETHOD(device_attach,	amdpmc_attach),
-	DEVMETHOD(device_detach,	amdpmc_detach),
+static device_method_t amdsmu_methods[] = {
+	DEVMETHOD(device_identify,	amdsmu_identify),
+	DEVMETHOD(device_probe,		amdsmu_probe),
+	DEVMETHOD(device_attach,	amdsmu_attach),
+	DEVMETHOD(device_detach,	amdsmu_detach),
 	DEVMETHOD_END
 };
 
-static driver_t amdpmc_driver = {
-	"amdpmc",
-	amdpmc_methods,
-	sizeof(struct amdpmc_softc),
+static driver_t amdsmu_driver = {
+	"amdsmu",
+	amdsmu_methods,
+	sizeof(struct amdsmu_softc),
 };
 
-DRIVER_MODULE(amdpmc, hostb, amdpmc_driver, NULL, NULL);
-MODULE_VERSION(amdpmc, 1);
-MODULE_DEPEND(amdpmc, amdsmn, 1, 1, 1);
-MODULE_PNP_INFO("U16:vendor;U16:device", pci, amdpmc, amdpmc_products,
-    nitems(amdpmc_products));
+DRIVER_MODULE(amdsmu, hostb, amdsmu_driver, NULL, NULL);
+MODULE_VERSION(amdsmu, 1);
+MODULE_DEPEND(amdsmu, amdsmn, 1, 1, 1);
+MODULE_PNP_INFO("U16:vendor;U16:device", pci, amdsmu, amdsmu_products,
+    nitems(amdsmu_products));

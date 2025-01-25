@@ -5,10 +5,10 @@
 # This software was developed by Aymeric Wibo <obiwac@freebsd.org>
 # under sponsorship from the FreeBSD Foundation.
 
-.PATH: ${SRCTOP}/sys/dev/amdpmc
+.PATH: ${SRCTOP}/sys/dev/amdsmu
 
-KMOD=	amdpmc
-SRCS=	amdpmc.c
+KMOD=	amdsmu
+SRCS=	amdsmu.c
 SRCS+=	bus_if.h device_if.h pci_if.h
 
 .include <bsd.kmod.mk>
