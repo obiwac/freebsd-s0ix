@@ -7,8 +7,6 @@
  * under sponsorship from the FreeBSD Foundation.
  */
 
-/* TODO Should this be called amdsmu instead? */
-
 #include <sys/param.h>
 #include <sys/bus.h>
 #include <sys/kernel.h>
@@ -131,14 +129,12 @@ static enum amdsmu_res
 amdsmu_wait_res(device_t dev)
 {
 	struct amdsmu_softc	*sc = device_get_softc(dev);
-	enum amdsmu_res	res;
+	enum amdsmu_res		res;
 
-	/* TODO Remove comment?
-	 * To know whether the SMU is ready to accept commands, we must wait
-	 * for the response register to contain "1" (SMU_RES_OK).
-	 * See https://lore.kernel.org/all/8ff4fcb8-36c9-f9e4-d05f-730e5379ec9c@redhat.com
+	/*
+	 * The SMU has a response ready for us when the response register is
+	 * set.  Otherwise, we must wait.
 	 */
-
 	for (size_t i = 0; i < SMU_RES_READ_MAX; i++) {
 		res = bus_space_read_4(sc->bus_tag, sc->reg_space,
 		    SMU_REG_RESPONSE);
@@ -152,21 +148,24 @@ amdsmu_wait_res(device_t dev)
 }
 
 static int
-amdsmu_cmd(device_t dev, uint32_t msg, uint32_t arg, uint32_t *ret)
+amdsmu_cmd(device_t dev, enum amdsmu_msg msg, uint32_t arg, uint32_t *ret)
 {
 	struct amdsmu_softc	*sc = device_get_softc(dev);
-	enum amdsmu_res	res;
+	enum amdsmu_res		res;
 
 	/* Wait for SMU to be ready. */
 	if (amdsmu_wait_res(dev) == SMU_RES_WAIT)
 		return (ETIMEDOUT);
 
-	/* Write out command to registers. */
+	/* Clear previous response. */
 	bus_space_write_4(sc->bus_tag, sc->reg_space, SMU_REG_RESPONSE,
 	    SMU_RES_WAIT);
+
+	/* Write out command to registers. */
 	bus_space_write_4(sc->bus_tag, sc->reg_space, SMU_REG_MESSAGE, msg);
 	bus_space_write_4(sc->bus_tag, sc->reg_space, SMU_REG_ARGUMENT, arg);
 
+	/* Wait for SMU response and handle it. */
 	res = amdsmu_wait_res(dev);
 
 	switch (res) {
@@ -184,6 +183,7 @@ amdsmu_cmd(device_t dev, uint32_t msg, uint32_t arg, uint32_t *ret)
 	case SMU_RES_UNKNOWN:
 	case SMU_RES_FAILED:
 		device_printf(dev, "SMU error: %02x\n", res);
+		return (EIO);
 	}
 
 	return (EINVAL);
@@ -192,18 +192,18 @@ amdsmu_cmd(device_t dev, uint32_t msg, uint32_t arg, uint32_t *ret)
 static void
 amdsmu_print_vers(device_t dev)
 {
-	uint32_t	fw_vers;
+	uint32_t	smu_vers;
 	uint8_t		smu_program;
 	uint8_t		smu_maj, smu_min, smu_rev;
 
-	if (amdsmu_cmd(dev, SMU_MSG_GETSMUVERSION, 0, &fw_vers) != 0) {
+	if (amdsmu_cmd(dev, SMU_MSG_GETSMUVERSION, 0, &smu_vers) != 0) {
 		device_printf(dev, "failed to get SMU version\n");
 		return;
 	}
-	smu_program = (fw_vers >> 24) & 0xFF;
-	smu_maj = (fw_vers >> 16) & 0xFF;
-	smu_min = (fw_vers >> 8) & 0xFF;
-	smu_rev = fw_vers & 0xFF;
+	smu_program = (smu_vers >> 24) & 0xFF;
+	smu_maj = (smu_vers >> 16) & 0xFF;
+	smu_min = (smu_vers >> 8) & 0xFF;
+	smu_rev = smu_vers & 0xFF;
 	device_printf(dev, "SMU version: %d.%d.%d (program %d)\n",
 	    smu_maj, smu_min, smu_rev, smu_program);
 }
