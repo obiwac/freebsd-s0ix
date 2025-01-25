@@ -12,6 +12,7 @@
 #include <sys/kernel.h>
 #include <sys/module.h>
 #include <sys/rman.h>
+#include <sys/sysctl.h>
 
 #include <machine/bus.h>
 #include <dev/pci/pcivar.h>
@@ -95,11 +96,17 @@ static const char *const amdsmu_ip_blocks[] = { "DISPLAY", "CPU", "GFX", "VDD",
     "VPE" };
 
 struct amdsmu_softc {
+	struct sysctl_ctx_list	*sysctlctx;
+	struct sysctl_oid	*sysctlnode;
+
 	struct resource		*res;
 	bus_space_tag_t 	bus_tag;
 
 	bus_space_handle_t	smu_space;
 	bus_space_handle_t	reg_space;
+
+	uint8_t			smu_program;
+	uint8_t			smu_maj, smu_min, smu_rev;
 
 	size_t			ip_block_count;
 	uint32_t		ip_blocks;
@@ -216,22 +223,34 @@ amdsmu_cmd(device_t dev, enum amdsmu_msg msg, uint32_t arg, uint32_t *ret)
 }
 
 static void
-amdsmu_print_vers(device_t dev)
+amdsmu_get_vers(device_t dev)
 {
-	uint32_t	smu_vers;
-	uint8_t		smu_program;
-	uint8_t		smu_maj, smu_min, smu_rev;
+	uint32_t		smu_vers;
+	struct amdsmu_softc	*sc = device_get_softc(dev);
 
 	if (amdsmu_cmd(dev, SMU_MSG_GETSMUVERSION, 0, &smu_vers) != 0) {
 		device_printf(dev, "failed to get SMU version\n");
 		return;
 	}
-	smu_program = (smu_vers >> 24) & 0xFF;
-	smu_maj = (smu_vers >> 16) & 0xFF;
-	smu_min = (smu_vers >> 8) & 0xFF;
-	smu_rev = smu_vers & 0xFF;
+	sc->smu_program = (smu_vers >> 24) & 0xFF;
+	sc->smu_maj = (smu_vers >> 16) & 0xFF;
+	sc->smu_min = (smu_vers >> 8) & 0xFF;
+	sc->smu_rev = smu_vers & 0xFF;
 	device_printf(dev, "SMU version: %d.%d.%d (program %d)\n",
-	    smu_maj, smu_min, smu_rev, smu_program);
+	    sc->smu_maj, sc->smu_min, sc->smu_rev, sc->smu_program);
+
+	/* Add sysctl nodes for SMU version. */
+	SYSCTL_ADD_U8(sc->sysctlctx, SYSCTL_CHILDREN(sc->sysctlnode), OID_AUTO,
+	    "program", CTLFLAG_RD, &sc->smu_program, 0, "SMU program number");
+	SYSCTL_ADD_U8(sc->sysctlctx, SYSCTL_CHILDREN(sc->sysctlnode), OID_AUTO,
+	    "version_major", CTLFLAG_RD, &sc->smu_maj, 0,
+	    "SMU firmware major version number");
+	SYSCTL_ADD_U8(sc->sysctlctx, SYSCTL_CHILDREN(sc->sysctlnode), OID_AUTO,
+	    "version_minor", CTLFLAG_RD, &sc->smu_min, 0,
+	    "SMU firmware minor version number");
+	SYSCTL_ADD_U8(sc->sysctlctx, SYSCTL_CHILDREN(sc->sysctlnode), OID_AUTO,
+	    "version_revision", CTLFLAG_RD, &sc->smu_rev, 0,
+	    "SMU firmware revision number");
 }
 
 static void
@@ -387,7 +406,11 @@ amdsmu_attach(device_t dev)
 		return (ENXIO);
 	}
 
-	amdsmu_print_vers(dev);
+	/* sysctl stuff. */
+	sc->sysctlctx = device_get_sysctl_ctx(dev);
+	sc->sysctlnode = device_get_sysctl_tree(dev);
+
+	amdsmu_get_vers(dev);
 
 	/* Get IP blocks. */
 	amdsmu_get_ip_blocks(dev);
