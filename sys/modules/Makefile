@@ -34,7 +34,7 @@ SUBDIR=	\
 	alq \
 	${_amd_ecc_inject} \
 	${_amdgpio} \
-	${_amdpmc} \
+	${_amdsmu} \
 	${_amdsbwd} \
 	${_amdsmn} \
 	${_amdtemp} \
@@ -757,7 +757,7 @@ _acpi=		acpi
 _aesni=		aesni
 .endif
 _amd_ecc_inject=amd_ecc_inject
-_amdpmc=	amdpmc
+_amdsmu=	amdsmu
 _amdsbwd=	amdsbwd
 _amdsmn=	amdsmn
 _amdtemp=	amdtemp
