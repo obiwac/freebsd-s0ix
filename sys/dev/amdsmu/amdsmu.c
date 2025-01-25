@@ -51,6 +51,24 @@ enum amdsmu_msg {
 	SMU_MSG_GET_SUP_CONSTRAINTS	= 0x09,
 };
 
+/* XXX Copied from Linux struct smu_metrics. */
+struct amdsmu_metrics {
+	uint32_t table_version;
+	uint32_t hint_count;
+	uint32_t s0i3_last_entry_status;
+	uint32_t timein_s0i2;
+	uint64_t timeentering_s0i3_lastcapture;
+	uint64_t timeentering_s0i3_totaltime;
+	uint64_t timeto_resume_to_os_lastcapture;
+	uint64_t timeto_resume_to_os_totaltime;
+	uint64_t timein_s0i3_lastcapture;
+	uint64_t timein_s0i3_totaltime;
+	uint64_t timein_swdrips_lastcapture;
+	uint64_t timein_swdrips_totaltime;
+	uint64_t timecondition_notmet_lastcapture[32];
+	uint64_t timecondition_notmet_totaltime[32];
+};
+
 /*
  * TODO These are in common with amdtemp; should we find a way to factor these
  * out?  Also, there are way more of these.  I couldn't find a centralized place
@@ -76,6 +94,8 @@ struct amdsmu_softc {
 
 	bus_space_handle_t	smu_space;
 	bus_space_handle_t	reg_space;
+	bus_space_handle_t	metrics_space;
+	bool			has_metrics;
 };
 
 static bool
@@ -204,6 +224,38 @@ amdsmu_print_vers(device_t dev)
 	    smu_maj, smu_min, smu_rev, smu_program);
 }
 
+static void
+amdsmu_init_metrics(device_t dev)
+{
+	struct amdsmu_softc	*sc = device_get_softc(dev);
+	uint32_t		metrics_addr_lo, metrics_addr_hi;
+	uint64_t		metrics_addr;
+
+	sc->has_metrics = false;
+
+	/* Get physical address of logging buffer. */
+	if (amdsmu_cmd(dev, SMU_MSG_LOG_GETDRAM_ADDR_LO, 0, &metrics_addr_lo)
+	    != 0)
+		return;
+	if (amdsmu_cmd(dev, SMU_MSG_LOG_GETDRAM_ADDR_HI, 0, &metrics_addr_hi)
+	    != 0)
+		return;
+	metrics_addr = ((uint64_t) metrics_addr_hi << 32) | metrics_addr_lo;
+
+	/* Map memory of logging buffer. */
+	if (bus_space_map(sc->bus_tag, metrics_addr,
+	    sizeof(struct amdsmu_metrics), 0, &sc->metrics_space) != 0) {
+		device_printf(dev, "could not map bus space for SMU metrics\n");
+		return;
+	}
+
+	/* Start logging for metrics. */
+	amdsmu_cmd(dev, SMU_MSG_LOG_RESET, 0, NULL);
+	amdsmu_cmd(dev, SMU_MSG_LOG_START, 0, NULL);
+
+	sc->has_metrics = true;
+}
+
 static int
 amdsmu_attach(device_t dev)
 {
@@ -248,6 +300,10 @@ amdsmu_attach(device_t dev)
 	}
 
 	amdsmu_print_vers(dev);
+
+	/* Set up for getting metrics. */
+	amdsmu_init_metrics(dev);
+
 	return (0);
 }
 
