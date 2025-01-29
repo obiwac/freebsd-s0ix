@@ -370,17 +370,17 @@ acpi_spmc_get_constraints(device_t dev)
 	if (sc->constraints_populated)
 		return (0);
 
-	/* XXX Assumes anything else (only Intel and MS right now) is to spec. */
 	is_amd = (sc->dsm_sets & DSM_SET_AMD) != 0;
 	if (is_amd) {
 		dsm_uuid = &amd_dsm_uuid;
 		dsm_index.amd = AMD_DSM_GET_DEVICE_CONSTRAINTS;
-	} else {
-		if (sc->dsm_sets & DSM_SET_MS)
-			dsm_uuid = &ms_dsm_uuid;
-		else
-			dsm_uuid = &intel_dsm_uuid;
+	} else if ((sc->dsm_sets & DSM_SET_INTEL) != 0) {
+		dsm_uuid = &intel_dsm_uuid;
 		dsm_index.regular = DSM_GET_DEVICE_CONSTRAINTS;
+	} else {
+		device_printf(dev, "no supported DSM set supports"
+		    "GET_DEVICE_CONSTRAINTS\n");
+		return (ENXIO);
 	}
 
 	/* XXX It seems like this DSM fails if called more than once. */
