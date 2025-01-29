@@ -48,13 +48,23 @@
 #include <machine/resource.h>
 
 enum sleep_type {
-	AWAKE		= ACPI_STATE_S0,
-	STANDBY		= ACPI_STATE_S1,
-	SUSPEND		= ACPI_STATE_S3,
-	HIBERNATE	= ACPI_STATE_S4,
-	POWEROFF	= ACPI_STATE_S5,
-	SUSPEND_TO_IDLE,
+    /*
+     * Map these with ACPI S-states the best we can.  We want to be able to
+     * assign an S-state to an enum sleep_type.  The other way round is
+     * impossible though, as we support additional non-S-state sleep types.
+     */
+    STYPE_AWAKE		= ACPI_STATE_S0,
+    STYPE_STANDBY	= ACPI_STATE_S1,
+    STYPE_STANDBY_S2	= ACPI_STATE_S2,
+    STYPE_SUSPEND	= ACPI_STATE_S3,
+    STYPE_HIBERNATE	= ACPI_STATE_S4,
+    STYPE_POWEROFF	= ACPI_STATE_S5,
+    STYPE_SUSPEND_TO_IDLE,
+    STYPE_COUNT,
+    STYPE_UNKNOWN	= ACPI_STATE_UNKNOWN,
 };
+
+CTASSERT(STYPE_COUNT == 7);
 
 struct apm_clone_data;
 struct acpi_softc {
@@ -62,17 +72,18 @@ struct acpi_softc {
     struct cdev		*acpi_dev_t;
 
     int			acpi_enabled;
-    enum sleep_type	acpi_sstate;
+    enum sleep_type	acpi_stype;
     int			acpi_sleep_disabled;
 
     struct sysctl_ctx_list acpi_sysctl_ctx;
     struct sysctl_oid	*acpi_sysctl_tree;
-    int			acpi_power_button_sx;
-    int			acpi_sleep_button_sx;
-    int			acpi_lid_switch_sx;
+    enum sleep_type	acpi_power_button_stype;
+    enum sleep_type	acpi_sleep_button_stype;
+    enum sleep_type	acpi_lid_switch_stype;
 
-    int			acpi_standby_sx;
-    int			acpi_suspend_sx;
+    enum sleep_type	acpi_standby_stype;
+    enum sleep_type	acpi_suspend_stype;
+    enum sleep_type	acpi_hibernate_stype;
 
     int			acpi_sleep_delay;
     int			acpi_s4bios;
@@ -87,7 +98,7 @@ struct acpi_softc {
     vm_offset_t		acpi_wakeaddr;
     vm_paddr_t		acpi_wakephys;
 
-    int			acpi_next_sstate;	/* Next suspend Sx state. */
+    enum sleep_type	acpi_next_stype;	/* Next suspend sleep type. */
     struct apm_clone_data *acpi_clone;		/* Pseudo-dev for devd(8). */
     STAILQ_HEAD(,apm_clone_data) apm_cdevs;	/* All apm/apmctl/acpi cdevs. */
     struct callout	susp_force_to;		/* Force suspend if no acks. */

@@ -259,9 +259,8 @@ main(int argc, char *argv[])
 			break;
 		case 's':
 			sflag = 1;
-			if (strcmp(optarg, "SUSPEND_TO_IDLE") == 0 ||
-			    strcmp(optarg, "S2IDLE") == 0) {
-			    sleep_type = SUSPEND_TO_IDLE;
+			if (strcmp(optarg, "S0i") == 0) {
+			    sleep_type = STYPE_SUSPEND_TO_IDLE;
 			    break;
 			}
 			if (optarg[0] == 'S')
