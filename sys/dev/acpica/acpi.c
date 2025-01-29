@@ -58,6 +58,7 @@
 #endif
 #include <machine/resource.h>
 #include <machine/bus.h>
+#include <machine/intr_machdep.h>
 #include <sys/rman.h>
 #include <isa/isavar.h>
 #include <isa/pnpvar.h>
@@ -3318,12 +3319,12 @@ enum acpi_sleep_state {
 
 static void
 do_standby(struct acpi_softc *sc, enum acpi_sleep_state *slp_state,
-    register_t intr)
+    register_t rflags)
 {
     ACPI_STATUS status;
 
     status = AcpiEnterSleepState(STYPE_STANDBY);
-    intr_restore(intr);
+    intr_restore(rflags);
     AcpiLeaveSleepStatePrep(STYPE_STANDBY);
     if (ACPI_FAILURE(status)) {
 	device_printf(sc->acpi_dev, "AcpiEnterSleepState failed - %s\n",
@@ -3335,7 +3336,7 @@ do_standby(struct acpi_softc *sc, enum acpi_sleep_state *slp_state,
 
 static void
 do_sleep(struct acpi_softc *sc, enum acpi_sleep_state *slp_state,
-    register_t intr, int state)
+    register_t rflags, int state)
 {
     int sleep_result;
     ACPI_EVENT_STATUS power_button_status;
@@ -3380,7 +3381,7 @@ do_sleep(struct acpi_softc *sc, enum acpi_sleep_state *slp_state,
 	}
     }
 
-    intr_restore(intr);
+    intr_restore(rflags);
 
     /* call acpi_wakeup_machdep() again with interrupt enabled */
     acpi_wakeup_machdep(sc, state, sleep_result, 1);
@@ -3396,24 +3397,31 @@ do_sleep(struct acpi_softc *sc, enum acpi_sleep_state *slp_state,
     *slp_state |= ACPI_SS_SLEPT;
 }
 
-// TODO Move these elsewhere.
-#include <machine/intr_machdep.h>
-#include <machine/specialreg.h>
-
 static void
 do_idle(struct acpi_softc *sc, enum acpi_sleep_state *slp_state,
-    register_t intr)
+    register_t rflags)
 {
 
     intr_suspend();
 
-    // TODO Explain what we're doing here.
+    /*
+     * The CPU will exit idle when interrupted, so we want to minimize the
+     * number of interrupts it can receive while idle.  We do this by only
+     * allowing SCI (system control interrupt) interrupts, which are used by
+     * the ACPI firmware to send wake GPEs to the OS.
+     *
+     * XXX We might still receive other spurious non-wake GPEs from noisy
+     * devices that can't be disabled, so this will need to end up being a
+     * suspend-to-idle loop which, when breaking out of idle, will check the
+     * reason for the wakeup and immediately idle the CPU again if it was not a
+     * proper wake event.
+     */
     intr_enable_src(AcpiGbl_FADT.SciInterrupt);
 
     cpu_idle(0);
 
     intr_resume(false);
-    intr_restore(intr);
+    intr_restore(rflags);
     *slp_state |= ACPI_SS_SLEPT;
 }
 
@@ -3425,7 +3433,7 @@ do_idle(struct acpi_softc *sc, enum acpi_sleep_state *slp_state,
 static ACPI_STATUS
 acpi_EnterSleepState(struct acpi_softc *sc, enum sleep_type stype)
 {
-    register_t intr;
+    register_t rflags;
     ACPI_STATUS status;
     enum acpi_sleep_state slp_state;
 
@@ -3524,11 +3532,11 @@ acpi_EnterSleepState(struct acpi_softc *sc, enum sleep_type stype)
 	DELAY(sc->acpi_sleep_delay * 1000000);
 
     suspendclock();
-    intr = intr_disable();
+    rflags = intr_disable();
     switch (stype) {
     case STYPE_STANDBY:
     case STYPE_STANDBY_S2:
-	do_standby(sc, &slp_state, intr);
+	do_standby(sc, &slp_state, rflags);
 	break;
     case STYPE_SUSPEND:
     case STYPE_HIBERNATE:
@@ -3536,10 +3544,10 @@ acpi_EnterSleepState(struct acpi_softc *sc, enum sleep_type stype)
 	 * Can pass suspend/hibernate enum sleep_type, as they are directly
 	 * mapped to ACPI S-states.
 	 */
-	do_sleep(sc, &slp_state, intr, stype);
+	do_sleep(sc, &slp_state, rflags, stype);
 	break;
     case STYPE_SUSPEND_TO_IDLE:
-	do_idle(sc, &slp_state, intr);
+	do_idle(sc, &slp_state, rflags);
 	break;
     case STYPE_AWAKE:
     case STYPE_POWEROFF:
