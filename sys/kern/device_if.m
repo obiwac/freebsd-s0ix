@@ -358,3 +358,34 @@ METHOD int quiesce {
 METHOD void * register {
 	device_t dev;
 } DEFAULT null_register;
+
+/**
+ * @brief Hint to the AMD SMU that we intend to enter sleep.
+ *
+ * Must be called by the ACPI sleep routine during s2idle before actually
+ * idling the CPU but after calling the SPMC entry function, if one was set on
+ * the ACPI softc.
+ *
+ * @param dev		the amdsmu device to hint entry to
+ *
+ * @retval 0		success
+ * @retval ETIMEDOUT	timed out trying to send a message to the SMU
+ */
+METHOD int amdsmu_enter_sleep {
+	device_t dev;
+};
+
+/**
+ * @brief Hint to the AMD SMU that we are exiting sleep.
+ *
+ * Must be called by the ACPI sleep routine during s2idle after waking the CPU
+ * but before calling the SPMC exit function, if one was set on the ACPI softc.
+ *
+ * @param dev		the amdsmu device to hint exit to
+ *
+ * @retval 0		success
+ * @retval ETIMEDOUT	timed out trying to send a message to the SMU
+ */
+METHOD int amdsmu_exit_sleep {
+	device_t dev;
+};
