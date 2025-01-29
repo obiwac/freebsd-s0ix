@@ -3410,11 +3410,7 @@ do_idle(struct acpi_softc *sc, enum acpi_sleep_state *slp_state,
     // TODO Explain what we're doing here.
     intr_enable_src(AcpiGbl_FADT.SciInterrupt);
 
-    // TODO Make this better.
-    if (sc->acpi_spmc_device != NULL)
-	cpu_mwait(MWAIT_INTRBREAK, MWAIT_C4);
-    else
-	cpu_idle(0);
+    cpu_idle(0);
 
     intr_resume(false);
     intr_restore(intr);
