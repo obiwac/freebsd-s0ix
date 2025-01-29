@@ -3412,7 +3412,7 @@ do_idle(struct acpi_softc *sc, enum acpi_sleep_state *slp_state,
 
     // TODO Make this better.
     if (sc->acpi_spmc_device != NULL)
-	cpu_mwait(MWAIT_INTRBREAK, MWAIT_C0);
+	cpu_mwait(MWAIT_INTRBREAK, MWAIT_C4);
     else
 	cpu_idle(0);
 
