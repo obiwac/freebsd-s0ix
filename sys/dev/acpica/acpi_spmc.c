@@ -476,6 +476,13 @@ acpi_spmc_run_dsm(device_t dev, struct uuid *uuid, int index)
 	AcpiOsFree(result.Pointer);
 }
 
+/*
+ * Try running the DSMs from all the DSM sets we have, as them failing costs us
+ * nothing, and it seems like on AMD platforms, both the AMD entry and Microsoft
+ * "modern" DSM's are required for it to enter modern standby.
+ *
+ * This is what Linux does too.
+ */
 static void
 acpi_spmc_display_off_notif(device_t dev)
 {
