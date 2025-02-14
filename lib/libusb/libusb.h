@@ -516,6 +516,7 @@ int 	libusb_detach_kernel_driver(libusb_device_handle * devh, int interface);
 int 	libusb_attach_kernel_driver(libusb_device_handle * devh, int interface);
 int	libusb_set_auto_detach_kernel_driver(libusb_device_handle *dev, int enable);
 int	libusb_set_interface_alt_setting(libusb_device_handle * devh, int interface_number, int alternate_setting);
+libusb_device *libusb_get_parent(libusb_device * dev);
 
 /* USB Descriptors */
 
