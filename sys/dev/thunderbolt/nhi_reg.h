@@ -55,7 +55,16 @@
 #define DEVICE_PINK_SARDINE_1	0x1669
 
 /* * * MMIO Registers
- * * Ring buffer registers
+ * * Host router/interface reset registers
+ */
+#define NHI_HRR		0x39898
+#define NHI_HIR		0x39858
+
+#define NHI_HRR_READ_PERIOD_US	50000 /* 50 ms */
+#define NHI_HRR_READ_MAX	100
+#define NHI_MAX_THIRESET	10000 /* 10 ms */
+
+/* * Ring buffer registers
  *
  * 32 transmit and receive rings are available, with Ring 0 being the most
  * important one.  The ring descriptors are 16 bytes each, and each set of

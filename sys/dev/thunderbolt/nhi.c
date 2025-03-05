@@ -280,6 +280,42 @@ nhi_outmail_cmd(struct nhi_softc *sc, uint32_t *val)
 	return (0);
 }
 
+static int
+nhi_reset(struct nhi_softc *sc)
+{
+	int			res = 1;
+
+	/* Reset host router.  See section 3.5 of HCM guide v2. */
+	nhi_write_reg(sc, NHI_HRR, 1);
+	for (size_t i = 0; i < NHI_HRR_READ_MAX && res; i++) {
+		/*
+		 * Wait at least 50 ms after writing before reading this
+		 * register.
+		 */
+		pause_sbt("nhi_pci", ustosbt(NHI_HRR_READ_PERIOD_US), 0,
+		    C_HARDCLOCK);
+		/* If this is 1, it means that we are still resetting. */
+		res = nhi_read_reg(sc, NHI_HRR);
+		printf("res %d\n", res);
+	}
+	if (res == 0) {
+		device_printf(sc->dev, "succeeded in resetting host router\n");
+		return (0);
+	}
+	device_printf(sc->dev, "host router reset timed out, attempting old"
+	    "host interface reset\n");
+	/*
+	 * If that doesn't work, we might be using a host router older than
+	 * version 2.0.  In that case, we'll need to do a host interface reset.
+	 *
+	 * TODO We should check that we're an old one so we can properly return
+	 * A timeout error message when we fail.
+	 */
+	nhi_write_reg(sc, NHI_HIR, 1);
+	pause_sbt("nhi_pci", ustosbt(NHI_MAX_THIRESET), 0, C_HARDCLOCK);
+	return (0);
+}
+
 int
 nhi_attach(struct nhi_softc *sc)
 {
@@ -291,6 +327,7 @@ nhi_attach(struct nhi_softc *sc)
 
 	mtx_init(&sc->nhi_mtx, "nhimtx", "NHI Control Mutex", MTX_DEF);
 
+	nhi_reset(sc);
 	nhi_configure_caps(sc);
 
 	/*
