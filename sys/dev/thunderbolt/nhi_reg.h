@@ -54,17 +54,20 @@
 #define DEVICE_PINK_SARDINE_0	0x1668
 #define DEVICE_PINK_SARDINE_1	0x1669
 
+/* Timings */
+#define NHI_SLPR_WAIT_US	50000 /* 50 ms, tSetSR */
+#define NHI_SLPR_WAIT_MAX	100
+
+/* Router config space registers */
+#define NHI_HRR			0x39898
+#define NHI_HIR			0x39858
+#define ROUTER_CS5		5
+#define NHI_SLP			1 /* Enter sleep (CS5). */
+#define ROUTER_CS6		6
+#define NHI_SLPR		1 /* Sleep ready (CS6). */
+
 /* * * MMIO Registers
- * * Host router/interface reset registers
- */
-#define NHI_HRR		0x39898
-#define NHI_HIR		0x39858
-
-#define NHI_HRR_READ_PERIOD_US	50000 /* 50 ms */
-#define NHI_HRR_READ_MAX	100
-#define NHI_MAX_THIRESET	10000 /* 10 ms */
-
-/* * Ring buffer registers
+ * * Ring buffer registers
  *
  * 32 transmit and receive rings are available, with Ring 0 being the most
  * important one.  The ring descriptors are 16 bytes each, and each set of
