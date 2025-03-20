@@ -83,6 +83,17 @@ struct amdsmu_metrics {
 #endif
 } __attribute__((packed));
 
+/* TODO These should either be in their own driver, or perhaps in amdsmn. */
+#define FCH_SSC_MEM_SIZE	0x800
+#define FCH_PHYSBASE_ADDR	0xFED81100
+
+enum fch_reg {
+	FCH_REG_S0I3_ENTRY_TIME_LO	= 0x30,
+	FCH_REG_S0I3_ENTRY_TIME_HI	= 0x34,
+	FCH_REG_S0I3_EXIT_TIME_LO	= 0x38,
+	FCH_REG_S0I3_EXIT_TIME_HI	= 0x3C,
+};
+
 /*
  * TODO These are in common with amdtemp; should we find a way to factor these
  * out?  Also, there are way more of these.  I couldn't find a centralized place
@@ -133,6 +144,12 @@ struct amdsmu_softc {
 	bus_space_handle_t	metrics_space;
 	bool			added_metrics_sysctl;
 	struct amdsmu_metrics	metrics;
+
+	// TODO FCH stuff.
+
+	struct resource		*fch_res;
+	bus_space_tag_t 	fch_bus_tag;
+	bus_space_handle_t	fch_ssc_space;
 };
 
 static bool
@@ -472,6 +489,49 @@ amdsmu_dump_metrics(device_t dev)
 }
 
 static int
+fch_attach(device_t dev)
+{
+	struct amdsmu_softc	*sc = device_get_softc(dev);
+	int			rid = 1;
+
+	sc->fch_res = bus_alloc_resource_any(dev, SYS_RES_MEMORY, &rid, RF_ACTIVE);
+	if (sc->fch_res == NULL) {
+		device_printf(dev, "could not allocate resource\n");
+		return (ENXIO);
+	}
+	sc->fch_bus_tag = rman_get_bustag(sc->fch_res);
+	if (bus_space_map(sc->fch_bus_tag, FCH_PHYSBASE_ADDR, FCH_SSC_MEM_SIZE,
+	    0, &sc->fch_ssc_space) != 0) {
+		device_printf(dev, "could not map bus space for FCH SSC\n");
+		bus_release_resource(dev, SYS_RES_MEMORY, rid, sc->fch_res);
+		sc->fch_res = NULL;
+		return (ENXIO);
+	}
+	return (0);
+}
+
+static void
+fch_dump(device_t dev)
+{
+	struct amdsmu_softc	*sc = device_get_softc(dev);
+	uint64_t		entry_time, exit_time;
+	uint64_t		residency;
+
+	entry_time = bus_space_read_4(sc->fch_bus_tag, sc->fch_ssc_space, FCH_REG_S0I3_ENTRY_TIME_HI);
+	entry_time = entry_time << 32 | bus_space_read_4(sc->fch_bus_tag, sc->fch_ssc_space, FCH_REG_S0I3_ENTRY_TIME_LO);
+
+	exit_time = bus_space_read_4(sc->fch_bus_tag, sc->fch_ssc_space, FCH_REG_S0I3_EXIT_TIME_HI);
+	exit_time = exit_time << 32 | bus_space_read_4(sc->fch_bus_tag, sc->fch_ssc_space, FCH_REG_S0I3_EXIT_TIME_LO);
+
+	/* It's in 48MHz. We need to convert it */
+	residency = (exit_time - entry_time) / 48;
+
+	device_printf(dev, "S0i3 entry time: %lu\n", entry_time);
+	device_printf(dev, "S0i3 exit time: %lu\n", exit_time);
+	device_printf(dev, "S0i3 residency: %lu\n", residency);
+}
+
+static int
 amdsmu_enter(device_t dev)
 {
 
@@ -552,6 +612,13 @@ amdsmu_attach(device_t dev)
 	amdsmu_init_metrics(dev);
 	amdsmu_dump_metrics(dev);
 
+	/* Set up FCH. */
+	if (fch_attach(dev) != 0) {
+		bus_release_resource(dev, SYS_RES_MEMORY, rid, sc->res);
+		sc->res = NULL;
+		return (ENXIO);
+	}
+
 	return (0);
 }
 
@@ -559,11 +626,15 @@ static int
 amdsmu_detach(device_t dev)
 {
 	struct amdsmu_softc	*sc = device_get_softc(dev);
-	int			rid = 0;
+	int			rid = 0, fch_rid = 1;
 
 	if (sc->res != NULL) {
 		bus_release_resource(dev, SYS_RES_MEMORY, rid, sc->res);
 		sc->res = NULL;
+	}
+	if (sc->fch_res != NULL) {
+		bus_release_resource(dev, SYS_RES_MEMORY, fch_rid, sc->fch_res);
+		sc->fch_res = NULL;
 	}
 
 	return (0);
