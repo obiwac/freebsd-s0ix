@@ -92,14 +92,6 @@ tb_string_t tb_security_level[] = {
 	{ 0, NULL }
 };
 
-tb_string_t tb_rdy_connmode[] = {
-	{ ICM_DRVREADY_CERT_TB_1ST_DEPTH, "Certified/1st" },
-	{ ICM_DRVREADY_ANY_TB_1ST_DEPTH,  "Any/1st" },
-	{ ICM_DRVREADY_CERT_TB_ANY_DEPTH, "Certified/Any" },
-	{ ICM_DRVREADY_ANY_TB_ANY_DEPTH,  "Any/Any"	},
-	{ 0, NULL }
-};
-
 tb_string_t tb_mbox_connmode[] = {
 	{ INMAILCMD_SETMODE_CERT_TB_1ST_DEPTH, "Certified/1st" },
 	{ INMAILCMD_SETMODE_ANY_TB_1ST_DEPTH,  "Any/1st"	},

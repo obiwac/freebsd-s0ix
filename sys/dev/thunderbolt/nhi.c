@@ -77,7 +77,6 @@ static void nhi_free_ring0(struct nhi_softc *);
 static void nhi_fill_rx_ring(struct nhi_softc *, struct nhi_ring_pair *);
 static int nhi_init(struct nhi_softc *);
 static void nhi_post_init(void *);
-static int nhi_icm_init(struct nhi_softc *);
 static int nhi_tx_enqueue(struct nhi_ring_pair *, struct nhi_cmd_frame *);
 static int nhi_setup_sysctl(struct nhi_softc *);
 
@@ -87,11 +86,6 @@ MALLOC_DEFINE(M_NHI, "nhi", "nhi driver memory");
 
 #ifndef NHI_DEBUG_LEVEL
 #define NHI_DEBUG_LEVEL 0
-#endif
-
-/* 0 = default, 1 = force-on, 2 = force-off */
-#ifndef NHI_FORCE_ICM
-#define NHI_FORCE_ICM 0
 #endif
 
 /* 0 = default, 1 = force-on, 2 = force-off */
@@ -110,7 +104,6 @@ nhi_get_tunables(struct nhi_softc *sc)
 	/* Set local defaults */
 	sc->debug = NHI_DEBUG_LEVEL;
 	sc->max_ring_count = NHI_DEFAULT_NUM_RINGS;
-	sc->force_icm = NHI_FORCE_ICM;
 	sc->force_hcm = NHI_FORCE_HCM;
 
 	/* Inherit setting from the upstream thunderbolt switch node */
@@ -139,8 +132,6 @@ nhi_get_tunables(struct nhi_softc *sc)
 		val = min(val, NHI_MAX_NUM_RINGS);
 		sc->max_ring_count = max(val, 1);
 	}
-	if (TUNABLE_INT_FETCH("hw.nhi.force_icm", &val) != 0)
-		sc->force_icm = val;
 	if (TUNABLE_INT_FETCH("hw.nhi.force_hcm", &val) != 0)
 		sc->force_hcm = val;
 
@@ -156,10 +147,6 @@ nhi_get_tunables(struct nhi_softc *sc)
 		val = min(val, NHI_MAX_NUM_RINGS);
 		sc->max_ring_count = max(val, 1);
 	}
-	snprintf(tmpstr, sizeof(tmpstr), "dev, nhi.%d.force_icm",
-	    device_get_unit(sc->dev));
-	if (TUNABLE_INT_FETCH(tmpstr, &val) != 0)
-		sc->force_icm = val;
 	snprintf(tmpstr, sizeof(tmpstr), "dev, nhi.%d.force_hcm",
 	    device_get_unit(sc->dev));
 	if (TUNABLE_INT_FETCH(tmpstr, &val) != 0)
@@ -171,12 +158,6 @@ nhi_get_tunables(struct nhi_softc *sc)
 static void
 nhi_configure_caps(struct nhi_softc *sc)
 {
-
-	if (NHI_IS_AR(sc) || NHI_IS_TR(sc) || NHI_IS_ICL(sc) ||
-	   (sc->force_icm == NHI_FORCE_ICM_ON))
-		sc->caps |= NHI_CAP_ICM;
-	if (sc->force_icm == NHI_FORCE_ICM_OFF)
-		sc->caps &= ~NHI_CAP_ICM;
 
 	if (NHI_IS_USB4(sc) || (sc->force_hcm == NHI_FORCE_HCM_ON))
 		sc->caps |= NHI_CAP_HCM;
@@ -321,7 +302,7 @@ nhi_attach(struct nhi_softc *sc)
 		error = tbdev_add_interface(sc);
 
 	if ((error == 0) && (NHI_USE_ICM(sc)))
-		error = icm_attach(sc);
+		tb_printf(sc, "WARN: device uses an internal connection manager\n");
 	if ((error == 0) && (NHI_USE_HCM(sc)))
 		;
 	error = hcm_attach(sc);
@@ -336,13 +317,8 @@ int
 nhi_detach(struct nhi_softc *sc)
 {
 
-	icm_driver_unload(sc);
-
 	if (NHI_USE_HCM(sc))
 		hcm_detach(sc);
-
-	if (NHI_USE_ICM(sc))
-		icm_detach(sc);
 
 	if (sc->root_rsc != NULL)
 		tb_router_detach(sc->root_rsc);
@@ -734,15 +710,13 @@ nhi_init(struct nhi_softc *sc)
 	nhi_write_reg(sc, NHI_DMA_MISC, val);
 
 	if (NHI_IS_AR(sc) || NHI_IS_TR(sc) || NHI_IS_ICL(sc))
-		nhi_icm_init(sc);
+		tb_printf(sc, "WARN: device uses an internal connection manager\n");
 
 	/*
 	 * Populate the controller (local) UUID, necessary for cross-domain
 	 * communications.
 	if (NHI_IS_ICL(sc))
 		nhi_pci_get_uuid(sc);
-	else if (NHI_IS_AR(sc) || NHI_IS_TR(sc))
-		icm_get_uuid(sc);
 	 */
 
 	/*
@@ -794,88 +768,6 @@ nhi_post_init(void *arg)
 	    u[6], u[5], u[4], u[3], u[2], u[1], u[0]);
 
 	config_intrhook_disestablish(&sc->ich);
-}
-
-static int
-nhi_icm_init(struct nhi_softc *sc)
-{
-	uint32_t val, opmode;
-	int error, tries;
-
-	tb_debug(sc, DBG_INIT, "Initializing NHI ICM\n");
-
-	/*
-	 * Check that the firmware Connection Manager is Ready.
-	 *
-	 * XXX When this register reads all 1's, it means that the controller
-	 * has gone back to sleep, and there's really no way to wake it up
-	 * short of doing a PCIe reset.  By the time we get here we've already
-	 * set up the queues, so a reset would need to set those up again.
-	 */
-	for (tries = 0; tries < 15; tries++) {
-		val = nhi_read_reg(sc, TBT_FW_STATUS);
-		tb_debug(sc, DBG_INIT | DBG_FULL,
-		    "poll %d: FW_STATUS= 0x%08x\n", tries, val);
-		if ((val != 0xffffffff) && (val & FWSTATUS_CM_READY))
-			break;
-		DELAY(1000000);
-	}
-
-	if ((val == 0xffffffff) || (val & FWSTATUS_CM_READY) == 0) {
-		/* XXX Need flow to reset / reflash the firmware */
-		tb_debug(sc, DBG_INIT|DBG_FULL, "ARC_DEBUG= 0x%08x\n", val);
-		tb_printf(sc, "Error: Connection Manager not ready\n");
-		error = EINVAL;
-		goto out;
-	}
-	tb_debug(sc, DBG_INIT, "Connection Manager is READY\n");
-
-	/* Get Firmware authenitcation mode */
-	if (NHI_IS_AR(sc) || NHI_IS_TR(sc)) {
-		tb_debug(sc, DBG_INIT, "Getting firmware auth mode\n");
-		if ((error = nhi_outmail_cmd(sc, &val)) != 0) {
-			tb_printf(sc, "Failed to get firmware status\n");
-			goto out;
-		}
-		opmode = val & OUTMAILCMD_OPMODE_MASK;
-		tb_debug(sc, DBG_INIT | DBG_FULL, "OUTMAILCMD= 0x%08x\n",
-		    val);
-		tb_debug(sc, DBG_INIT, "%s\n",
-		    tb_get_string(opmode, nhi_outmailcmd_opmode));
-
-		if (opmode != OUTMAILCMD_OPMODE_CM_FULL ||
-		    (val & OUTMAILCMD_STATUS_BUSY) != 0) {
-			tb_printf(sc, "Error: Connection Manager in wrong "
-			    "state\n");
-			error = EINVAL;
-			goto out;
-		}
-	}
-
-	/* Set the connection mode unconditionally to ANY/ANY */
-	if (NHI_IS_AR(sc) || NHI_IS_TR(sc)) {
-		tb_debug(sc, DBG_TB|DBG_INIT, "Setting connmode to %s\n",
-		    tb_get_string(INMAILCMD_SETMODE_ANY_TB_ANY_DEPTH,
-		    tb_mbox_connmode));
-		if ((error = nhi_inmail_cmd(sc,
-		    INMAILCMD_SETMODE_ANY_TB_ANY_DEPTH, 0)) != 0) {
-			tb_printf(sc, "Warning: unable to set connection "
-			    "mode to ANY/ANY\n");
-			/* XXX I guess this isn't fatal? */
-			error = 0;
-		}
-	}
-
-	if (NHI_USE_ICM(sc))
-		error = icm_init(sc);
-	else
-		error = 0;
-
-out:
-	if (error)
-		tb_printf(sc, "Driver initialization failed, error %d\n",
-		    error);
-	return (error);
 }
 
 static int
@@ -1274,9 +1166,6 @@ nhi_setup_sysctl(struct nhi_softc *sc)
 	SYSCTL_ADD_U16(ctx, SYSCTL_CHILDREN(tree), OID_AUTO,
 	    "max_rings", CTLFLAG_RD, &sc->max_ring_count, 0,
 	    "Max number of rings available");
-	SYSCTL_ADD_U8(ctx, SYSCTL_CHILDREN(tree), OID_AUTO,
-	    "force_icm", CTLFLAG_RD, &sc->force_icm, 0,
-	    "Force on/off communications with the internal connection manager");
 	SYSCTL_ADD_U8(ctx, SYSCTL_CHILDREN(tree), OID_AUTO,
 	    "force_hcm", CTLFLAG_RD, &sc->force_hcm, 0,
 	    "Force on/off the function of the host connection manager");

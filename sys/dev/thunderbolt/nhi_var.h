@@ -49,7 +49,6 @@ struct nhi_softc;
 struct nhi_ring_pair;
 struct nhi_intr_tracker;
 struct nhi_cmd_frame;
-struct icm_softc;
 struct hcm_softc;
 struct router_softc;
 
@@ -156,7 +155,6 @@ struct nhi_softc {
 #define NHI_CAP_HCM		0x02
 #define NHI_USE_ICM(sc)		((sc)->caps & NHI_CAP_ICM)
 #define NHI_USE_HCM(sc)		((sc)->caps & NHI_CAP_HCM)
-	struct icm_softc	*icmsc;
 	struct hcm_softc	*hcm;
 	struct router_softc	*root_rsc;
 
@@ -195,11 +193,6 @@ struct nhi_softc {
 	struct sysctl_oid	*sysctl_tree;
 
 	struct intr_config_hook	ich;
-
-	uint8_t			force_icm;
-#define NHI_FORCE_ICM_DEFAULT	0x00
-#define NHI_FORCE_ICM_ON	0x01
-#define NHI_FORCE_ICM_OFF	0x02
 
 	uint8_t			force_hcm;
 #define NHI_FORCE_HCM_DEFAULT	0x00

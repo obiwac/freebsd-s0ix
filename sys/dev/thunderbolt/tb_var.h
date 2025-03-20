@@ -38,11 +38,6 @@ typedef struct {
 	int8_t depth;
 } tb_addr_t;
 
-struct icm_event {
-	TAILQ_ENTRY(icm_event)	link;
-	uint32_t		buf[];
-};
-
 MALLOC_DECLARE(M_THUNDERBOLT);
 
 #define TB_VENDOR_LEN	48
@@ -50,94 +45,10 @@ MALLOC_DECLARE(M_THUNDERBOLT);
 #define TB_MAX_LINKS	4
 #define TB_MAX_DEPTH	6
 
-struct icm_device {
-	TAILQ_ENTRY(icm_device)	link;
-	int8_t		conn_key;
-	uint8_t		conn_id;
-	tb_route_t	route;
-	tb_addr_t	ld;
-	uint8_t		EPUID[16];
-	uint16_t	flags;
-#define TBDEV_LINK_DUAL		(1 << 0)
-#define TBDEV_DEPTH_FIRST	(1 << 1)
-#define TBDEV_LANE_20G		(1 << 2)
-#define TBDEV_NO_APPROVE	(1 << 4)
-#define TBDEV_REJECTED		(1 << 5)
-#define TBDEV_ATBOOT		(1 << 6)
-	uint8_t		power;
-#define TBDEV_POWER_SELF	0
-#define TBDEV_POWER_NORM	1
-#define TBDEV_POWER_HIGH	2
-#define TBDEV_POWER_UNK		3
-	uint8_t		security;
-	uint8_t		vendor[TB_VENDOR_LEN];
-	uint8_t		model[TB_MODEL_LEN];
-
-#define TB_NODENAME_LEN		17
-	char			nodename[TB_NODENAME_LEN];
-	struct sysctl_ctx_list	ctx;
-	struct sysctl_oid	*tree;
-};
-
-struct icm_command;
-typedef void (*icm_callback_t)(struct icm_softc *, struct icm_command *, void *);
-
-struct icm_command {
-	struct nhi_cmd_frame	*nhicmd;
-	u_int			flags;
-#define ICM_CMD_POLL_COMPLETE	(1 << 0)
-	uint8_t			resp_buffer[NHI_RING0_FRAME_SIZE];
-	int			resp_len;
-	u_int			resp_code;
-	icm_callback_t		callback;
-	void			*callback_arg;
-};
-
-#define TB_FWSTRING_LEN		16
-struct icm_softc {
-	struct nhi_softc	*sc;
-	device_t		dev;
-	u_int			debug;
-	u_int			flags;
-#define TBSC_DRIVER_WAITING	(1 << 0)
-#define TBSC_DRIVER_READY	(1 << 1)
-	TAILQ_HEAD(, icm_device) icm_devs;
-
-	struct mtx		mtx;
-	struct nhi_cmd_frame	*tx_inflight_cmd;
-	TAILQ_HEAD(, nhi_cmd_frame)	tx_queue;
-	struct nhi_ring_pair	*ring0;
-
-	TAILQ_HEAD(, icm_event)	cmevent_list;
-	struct task		cmevent_task;
-	struct taskqueue	*taskqueue;
-	struct intr_config_hook	ich;
-
-	int			user_approve;
-	uint8_t			sec;
-	uint8_t			acl;
-
-	struct sysctl_ctx_list	sysctl_ctx;
-	struct sysctl_oid	*sysctl_tree;
-	char			fw_string[TB_FWSTRING_LEN];
-};
-
-int icm_attach(struct nhi_softc *);
-void icm_detach(struct nhi_softc *);
-int icm_init(struct nhi_softc *);
-int icm_driver_unload(struct nhi_softc *);
-int icm_get_uuid(struct nhi_softc *);
-
 static __inline uint32_t
 tb_calc_crc(void *data, u_int len)
 {
 	return ( ~ (calculate_crc32c(~0L, data, len)));
-}
-
-static __inline void *
-icm_get_frame_data(struct icm_command *icmd)
-{
-	return ((void *)icmd->nhicmd->data);
 }
 
 #endif /* _TB_VAR_H */
