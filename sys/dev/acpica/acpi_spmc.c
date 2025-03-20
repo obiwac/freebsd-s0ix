@@ -128,7 +128,7 @@ rev_for_uuid(struct uuid *uuid)
 		return 0;
 	if (uuid == &amd_dsm_uuid)
 		return 0;
-	KASSERT(false, "unsupported DSM UUID");
+	KASSERT(false, ("unsupported DSM UUID"));
 	return (0);
 }
 
@@ -153,11 +153,11 @@ acpi_spmc_probe(device_t dev)
 	/* Check which sets of DSM's are supported. */
 	enum dsm_set dsm_sets = 0;
 
-	uint64_t const dsm_bits = acpi_DSMQuery(handle,
+	const uint64_t dsm_bits = acpi_DSMQuery(handle,
 	    (uint8_t *)&intel_dsm_uuid, rev_for_uuid(&intel_dsm_uuid));
-	uint64_t const ms_dsm_bits = acpi_DSMQuery(handle,
+	const uint64_t ms_dsm_bits = acpi_DSMQuery(handle,
 	    (uint8_t *)&ms_dsm_uuid, rev_for_uuid(&ms_dsm_uuid));
-	uint64_t const amd_dsm_bits = acpi_DSMQuery(handle,
+	const uint64_t amd_dsm_bits = acpi_DSMQuery(handle,
 	    (uint8_t *)&amd_dsm_uuid, rev_for_uuid(&amd_dsm_uuid));
 
 	if ((dsm_bits & 1) != 0)
@@ -247,7 +247,7 @@ acpi_spmc_get_constraints_spec(struct acpi_spmc_softc *sc, ACPI_OBJECT *object)
 	ACPI_OBJECT	*constraint_package;
 
 	KASSERT(sc->constraints_populated == false,
-	    "constraints already populated");
+	    ("constraints already populated"));
 
 	sc->constraint_count = object->Package.Count;
 	sc->constraints = malloc(sc->constraint_count * sizeof *sc->constraints,
@@ -299,7 +299,7 @@ acpi_spmc_get_constraints_amd(struct acpi_spmc_softc *sc, ACPI_OBJECT *object)
 	ACPI_OBJECT	*name_obj;
 
 	KASSERT(sc->constraints_populated == false,
-	    "constraints already populated");
+	    ("constraints already populated"));
 
 	/* 
 	 * First element in the package is unknown.
@@ -422,7 +422,7 @@ acpi_spmc_check_constraints(struct acpi_spmc_softc *sc)
 {
 	bool violation = false;
 
-	KASSERT(sc->constraints_populated, "constraints not populated");
+	KASSERT(sc->constraints_populated, ("constraints not populated"));
 	for (size_t i = 0; i < sc->constraint_count; i++) {
 		struct acpi_spmc_constraint *constraint = &sc->constraints[i];
 
