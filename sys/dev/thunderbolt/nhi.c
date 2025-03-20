@@ -388,13 +388,13 @@ int
 nhi_detach(struct nhi_softc *sc)
 {
 
-	icm_driver_unload(sc);
-
 	if (NHI_USE_HCM(sc))
 		hcm_detach(sc);
 
-	if (NHI_USE_ICM(sc))
+	if (NHI_USE_ICM(sc)) {
+		icm_driver_unload(sc);
 		icm_detach(sc);
+	}
 
 	if (sc->root_rsc != NULL)
 		tb_router_detach(sc->root_rsc);
