@@ -273,7 +273,7 @@ struct nhi_host_caps {
 #define ICL_VSCAP22_FORCEPWR	(1 << 1)
 
 /* * Data structures
- * Transmit buffer descriptor.  Must be aligned on a 4byte boundary
+ * Transmit buffer descriptor, 12.3.1.  Must be aligned on a 4byte boundary
  */
 struct nhi_tx_buffer_desc {
 	uint32_t			addr_lo;
@@ -292,7 +292,7 @@ struct nhi_tx_buffer_desc {
 } __packed;
 
 /*
- * Receive buffer descriptor.  4 byte aligned.  This goes into
+ * Receive buffer descriptor, 12.4.1.  4 byte aligned.  This goes into
  * the descriptor ring, but changes into the _post form when the
  * controller uses it.
  */
