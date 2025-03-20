@@ -319,8 +319,9 @@ nhi_reset(struct nhi_softc *sc)
 int
 nhi_attach(struct nhi_softc *sc)
 {
-	uint32_t val;
-	int error = 0;
+	uint32_t		val;
+	struct nhi_host_caps	caps;
+	int			error = 0;
 
 	if ((error = nhi_setup_sysctl(sc)) != 0)
 		return (error);
@@ -331,13 +332,27 @@ nhi_attach(struct nhi_softc *sc)
 	nhi_configure_caps(sc);
 
 	/*
-	 * Get the number of TX/RX paths.  This sizes some of the register
-	 * arrays during allocation and initialization.  USB4 spec says that
-	 * the max is 21.  Alpine Ridge appears to default to 12.
+	 * Get the host interface version and number of TX/RX paths.  This
+	 * sizes some of the register arrays during allocation and
+	 * initialization.  USB4 spec says that the max is 21.  Alpine Ridge
+	 * appears to default to 12.
 	 */
-	val = GET_HOST_CAPS_PATHS(nhi_read_reg(sc, NHI_HOST_CAPS));
-	tb_debug(sc, DBG_INIT|DBG_NOISY, "Total Paths= %d\n", val);
-	if ((val == 0) || (val > 21) || ((NHI_IS_AR(sc) && val != 12))) {
+	val = nhi_read_reg(sc, NHI_HOST_CAPS);
+	caps = *(struct nhi_host_caps *)&val;
+	if (caps.version_major == 0 && caps.version_minor == 0) {
+		tb_printf(sc, "Host interface is version 1.0\n");
+		sc->ver = NHI_VER_1_0;
+	} else if (caps.version_major == 2 && caps.version_minor == 0) {
+		tb_printf(sc, "Host interface is version 2.0\n");
+		sc->ver = NHI_VER_2_0;
+	} else {
+		tb_printf(sc, "WARN: unexpected host interface version %d.%d -"
+		    " assuming 1.0\n", caps.version_major, caps.version_minor);
+		sc->ver = NHI_VER_1_0;
+	}
+	tb_debug(sc, DBG_INIT|DBG_NOISY, "Total Paths= %d\n", caps.total_paths);
+	if ((caps.total_paths == 0) || (caps.total_paths > 21) ||
+	    ((NHI_IS_AR(sc) && caps.total_paths != 12))) {
 		tb_printf(sc, "WARN: unexpected number of paths: %d\n", val);
 		/* return (ENXIO); */
 	}
