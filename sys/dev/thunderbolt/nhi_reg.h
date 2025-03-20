@@ -58,14 +58,6 @@
 #define NHI_SLPR_WAIT_US	50000 /* 50 ms, tSetSR */
 #define NHI_SLPR_WAIT_MAX	100
 
-/* Router config space registers */
-#define NHI_HRR			0x39898
-#define NHI_HIR			0x39858
-#define ROUTER_CS5		5
-#define NHI_SLP			1 /* Enter sleep (CS5). */
-#define ROUTER_CS6		6
-#define NHI_SLPR		1 /* Sleep ready (CS6). */
-
 /* * * MMIO Registers
  * * Ring buffer registers
  *
