@@ -61,6 +61,7 @@ struct router_softc {
 	tb_route_t		route;
 	device_t		dev;
 	struct nhi_softc	*nsc;
+	bool			suspended;
 
 	struct mtx		mtx;
 	struct nhi_ring_pair	*ring0;
@@ -101,6 +102,7 @@ struct router_cfg_cap {
 int tb_router_attach(struct router_softc *, tb_route_t);
 int tb_router_attach_root(struct nhi_softc *, tb_route_t);
 int tb_router_detach(struct router_softc *);
+int tb_router_suspend(struct router_softc *);
 int tb_config_read(struct router_softc *, u_int, u_int, u_int, u_int,
     uint32_t *);
 int tb_config_read_polled(struct router_softc *, u_int, u_int, u_int, u_int,
