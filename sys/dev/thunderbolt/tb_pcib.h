@@ -83,6 +83,8 @@ struct tb_pcib_softc {
 #define TB_DEV_AR_C_2C		0x15da
 #define TB_DEV_ICL_0		0x8a1d
 #define TB_DEV_ICL_1		0x8a21
+#define TB_DEV_PINK_SARDINE_0	0x14ef
+#define TB_DEV_PINK_SARDINE_1	0x14ea
 
 #define TB_PCIB_VSEC(dev) ((struct tb_pcib_softc *)(device_get_softc(dev)))->vsec;
 #define TB_DESC_MAX	80

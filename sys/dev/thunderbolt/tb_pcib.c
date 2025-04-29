@@ -105,6 +105,10 @@ struct tb_pcib_ident {
 	    "Thunderbolt 3 PCI-PCI Bridge (IceLake)" },
 	{ VENDOR_INTEL, TB_DEV_ICL_1, 0xffff, 0xffff, TB_GEN_TB3|TB_HWIF_ICL,
 	    "Thunderbolt 3 PCI-PCI Bridge (IceLake)" },
+	{ VENDOR_AMD, TB_DEV_PINK_SARDINE_0, 0xffff, 0xffff,
+	    TB_GEN_USB4|TB_HWIF_USB4, "USB4 PCI-PCI Bridge (Pink sardine)" },
+	{ VENDOR_AMD, TB_DEV_PINK_SARDINE_1, 0xffff, 0xffff,
+	    TB_GEN_USB4|TB_HWIF_USB4, "USB4 PCI-PCI Bridge (Pink sardine)" },
 	{ 0, 0, 0, 0, 0, NULL }
 };
 
@@ -463,7 +467,7 @@ tb_pcib_pcie2cio_write(device_t dev, u_int space, u_int port, u_int offset,
 /*
  * The Upstream Facing Port (UFP) in a switch is special, it's the function
  * that responds to some of the special programming mailboxes.  It can't be
- * differentiated by PCI ID, so a hueristic approach to identifying it is
+ * differentiated by PCI ID, so a heuristic approach to identifying it is
  * required.
  */
 static int

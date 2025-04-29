@@ -392,6 +392,10 @@ tb_config_read(struct router_softc *sc, u_int space, u_int adapter,
 			break;
 		sc->inflight_cmd = NULL;
 		tb_debug(sc, DBG_ROUTER, "Config command timed out, retries=%d\n", retries);
+		/*
+		 * TODO We might want to check if the done (DD) bit is set in
+		 * the ring memory but we didn't get an interrupt.
+		 */
 	}
 
 	if (cmd->ev != 0)

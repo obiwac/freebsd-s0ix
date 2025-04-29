@@ -383,7 +383,7 @@ nhi_pci_configure_interrupts(struct nhi_softc *sc)
 
 	tb_debug(sc, DBG_INIT, "Set up %d interrupts\n", sc->msix_count);
 
-	/* Set the interrupt trottle rate to 128us */
+	/* Set the interrupt throttle rate to 128us */
 	for (i = 0; i < 16; i ++)
 		nhi_write_reg(sc, NHI_ITR0 + i * 4, 0x1f4);
 
