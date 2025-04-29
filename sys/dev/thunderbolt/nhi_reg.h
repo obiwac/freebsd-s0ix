@@ -54,6 +54,10 @@
 #define DEVICE_PINK_SARDINE_0	0x1668
 #define DEVICE_PINK_SARDINE_1	0x1669
 
+/* Timings */
+#define NHI_SLPR_WAIT_US	50000 /* 50 ms, tSetSR */
+#define NHI_SLPR_WAIT_MAX	100
+
 /* * * MMIO Registers
  * * Ring buffer registers
  *
@@ -176,7 +180,15 @@
 
 /* Native Host Interface Control registers */
 #define NHI_HOST_CAPS			0x39640
-#define	GET_HOST_CAPS_PATHS(val)	((val) & 0x3f)
+
+/* Host Interface Capabilities, 12.6.3.1.1 */
+struct nhi_host_caps {
+	uint32_t	total_paths:11;
+	uint8_t		reserved1:5;
+	uint8_t		version_major:3;
+	uint8_t		version_minor:5;
+	uint8_t		reserved0:8;
+} __packed;
 
 /*
  * This definition comes from the Linux driver.  In the USB4 spec, this

@@ -87,6 +87,17 @@ struct router_cfg_cap {
 	uint16_t	vsec_len;
 };
 
+/* Router config space registers */
+#define ROUTER_HRR	0x39898
+#define ROUTER_HIR	0x39858
+#define ROUTER_CS_5	5
+#define ROUTER_SLP	(1<<0)	/* Enter sleep (CS5). */
+#define ROUTER_WOP	(1<<1)	/* Wake on PCIe (CS5). */
+#define ROUTER_WOU	(1<<2)	/* Wake on USB3 (CS5). */
+#define ROUTER_WOD	(1<<3)	/* Wake on DP (CS5). */
+#define ROUTER_CS_6	6
+#define ROUTER_SLPR	(1<<0)	/* Sleep ready (CS6). */
+
 int tb_router_attach(struct router_softc *, tb_route_t);
 int tb_router_attach_root(struct nhi_softc *, tb_route_t);
 int tb_router_detach(struct router_softc *);
