@@ -74,6 +74,7 @@ static int router_schedule_locked(struct router_softc *,
 static nhi_ring_cb_t router_complete_intr;
 static nhi_ring_cb_t router_response_intr;
 static nhi_ring_cb_t router_notify_intr;
+static nhi_ring_cb_t router_hotplug_intr;
 
 #define CFG_DEFAULT_RETRIES	3
 #define CFG_DEFAULT_TIMEOUT	2
@@ -198,6 +199,7 @@ router_register_interrupts(struct router_softc *sc)
 	struct nhi_dispatch rx[] = { { PDF_READ, router_response_intr, sc },
 				     { PDF_WRITE, router_response_intr, sc },
 				     { PDF_NOTIFY, router_notify_intr, sc },
+				     { PDF_HOTPLUG, router_hotplug_intr, sc },
 				     { 0, NULL, NULL } };
 
 	return (nhi_register_pdf(sc->ring0, tx, rx));
@@ -595,7 +597,7 @@ static int
 router_schedule_locked(struct router_softc *sc, struct router_command *cmd)
 {
 	struct nhi_cmd_frame *nhicmd;
-	int error;
+	int error = 0;
 
 	tb_debug(sc, DBG_ROUTER|DBG_EXTRA, "router_schedule\n");
 
@@ -763,6 +765,85 @@ router_notify_intr(void *context, union nhi_ring_desc *ring, struct nhi_cmd_fram
 		break;
 	}
 	return;
+}
+
+static void
+router_hotplug_ack(struct router_softc *sc, struct tb_cfg_hotplug *event,
+    bool unplug)
+{
+	struct router_command		*cmd;
+	struct tb_cfg_notify		*ack;
+	size_t				len = sizeof(*ack);
+	struct nhi_cmd_frame		*nhicmd;
+	uint32_t			*msg;
+	int				msglen, err;
+
+	if ((err = router_alloc_cmd(sc, &cmd)) != 0) {
+		tb_printf(sc, "Failed to allocate hotplug ack command: %d\n",
+		    err);
+		return;
+	}
+
+	ack = router_get_frame_data(cmd);
+	bzero(ack, len);
+	ack->route = event->route;
+	/* TODO I don't get what the sequence bit is. */
+	ack->event_adap = TB_CFG_HP_ACK |
+	    (unplug ? TB_CFG_UPG_UNPLUG : TB_CFG_PG_PLUG);
+
+	nhicmd = cmd->nhicmd;
+	msglen = (len - 4) / 4;
+	for (size_t i = 0; i < msglen; i++)
+		nhicmd->data[i] = htobe32(nhicmd->data[i]);
+
+	msg = (uint32_t *)nhicmd->data;
+	msg[msglen] = htobe32(tb_calc_crc(nhicmd->data, len - 4));
+
+	/* TODO We're gonna want to factor out a notify function. */
+	nhicmd->pdf = PDF_NOTIFY;
+	nhicmd->req_len = len;
+
+	nhicmd->timeout = NHI_CMD_TIMEOUT;
+	nhicmd->retries = 0;
+	nhicmd->context = cmd;
+
+	mtx_lock(&sc->mtx);
+	if ((err = nhi_tx_schedule(sc->ring0, nhicmd)) != 0)
+		tb_debug(sc, DBG_ROUTER, "nhi ring error "
+		    "%d\n", err);
+	mtx_unlock(&sc->mtx);
+	router_free_cmd(sc, cmd);
+}
+
+static void
+router_hotplug_intr(void *context, union nhi_ring_desc *ring,
+    struct nhi_cmd_frame *nhicmd)
+{
+	struct router_softc	*sc;
+	struct tb_cfg_hotplug	event;
+	bool			unplug;
+	uint8_t			adap_num;
+
+	KASSERT(context != NULL, ("context cannot be NULL\n"));
+
+	sc = (struct router_softc *)context;
+	tb_debug(sc, DBG_ROUTER|DBG_EXTRA, "%s called\n", __func__);
+
+	event.route.hi = be32toh(nhicmd->data[0]);
+	event.route.lo = be32toh(nhicmd->data[1]);
+	event.adapter_attrs = be32toh(nhicmd->data[2]);
+	unplug = !!(event.adapter_attrs & TB_CFG_UPG_UNPLUG);
+	adap_num = event.adapter_attrs & TB_CFG_ADPT_MASK;
+
+	tb_debug(sc, DBG_ROUTER, "Hotplug event route 0x%08x%08x adap %d %s\n",
+	    event.route.hi, event.route.lo, adap_num,
+	    unplug ? "unplugged" : "plugged");
+
+	/*
+	 * Need to respond to hotplug events with hotplug acknowledgment.
+	 * Otherwise, hotplug events will be retransmitted by router (4.6).
+	 */
+	router_hotplug_ack(sc, &event, unplug);
 }
 
 int
