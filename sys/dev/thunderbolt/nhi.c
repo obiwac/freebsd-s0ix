@@ -1033,6 +1033,10 @@ nhi_deregister_pdf(struct nhi_ring_pair *rp, struct nhi_dispatch *tx,
  * descriptor, and we know if we have reached the last descriptor that the
  * hardware touched.  This technique saves at least 2 MEMIO reads per
  * interrupt.
+ *
+ * TODO Is this actually okay?  What if we fail to get a completion interrupts
+ * but hardware updated CI anyway?  I know this can happen, but is this an
+ * issue?
  */
 void
 nhi_intr(void *data)
@@ -1052,6 +1056,16 @@ nhi_intr(void *data)
 	    trkr->vector);
 	if ((r = trkr->ring) == NULL)
 		return;
+
+	/*
+	 * Need to read this necessarily to clear it; see 12.6.3.4.1.  Disable
+	 * ISR Auto-Clear must be set to 0.
+	 *
+	 * XXX This might not be necessary on all platforms.  It is on Pink
+	 * Sardine, but this was not being done previously so it might have
+	 * been working without this on whatever Scott was testing on.
+	 */
+	nhi_read_reg(sc, NHI_ISR0);
 
 	/*
 	 * Process TX completions from the adapter.  Only go through
