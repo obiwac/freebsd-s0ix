@@ -111,7 +111,7 @@ struct tb_cfg_notify_ack {
 	uint32_t			crc;
 } __packed;
 
-/* Config space hot plug event, 6.4.2.9 */
+/* Config space hot plug event, 6.4.2.10 */
 struct tb_cfg_hotplug {
 	tb_route_t			route;
 	uint32_t			adapter_attrs;
@@ -121,14 +121,14 @@ struct tb_cfg_hotplug {
 	uint32_t			crc;
 } __packed;
 
-/* Config space inter-domain request, 6.4.2.10 */
+/* Config space inter-domain request, 6.4.2.11 */
 struct tb_cfg_xdomain {
 	tb_route_t			route;
 	uint32_t			data[0];
 	/* uint32_t crc is at the end */
 } __packed;
 
-/* Config space inter-domain response, 6.4.2.11 */
+/* Config space inter-domain response, 6.4.2.12 */
 struct tb_cfg_xdomain_resp {
 	tb_route_t			route;
 	uint32_t			data[0];
