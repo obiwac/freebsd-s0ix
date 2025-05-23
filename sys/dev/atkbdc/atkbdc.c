@@ -130,14 +130,29 @@ static struct atkbdc_quirks quirks[] = {
     {"coreboot", "Google", NULL, NULL, CHROMEBOOK_WORKAROUND},
     /* KBDC hangs on Lenovo X120e and X121e after disabling AUX MUX */
     {NULL, "LENOVO", NULL, NULL, KBDC_QUIRK_DISABLE_MUX_PROBE},
+    /*
+     * On the AMD Frameworks, the EC doesn't emulate an i8042 perfectly, and
+     * the initial call to atkbd_probe will fail.  Thus, only once we get a
+     * first interrupt will the keyboard be initialized, which means we miss
+     * the first interrupt (i.e. keypress).  So ignore the probe result.
+     *
+     * Furthermore, as of BIOS version 3.09, it seems we must sometimes reset
+     * the controller for it to send us any interrupts.
+     */
+    {"INSYDE Corp.", "Framework", "AMD", "03.09",
+	KBDC_QUIRK_IGNORE_PROBE_RESULT | KBDC_QUIRK_RESET_AFTER_PROBE},
+    {"INSYDE Corp.", "Framework", "AMD", NULL, KBDC_QUIRK_IGNORE_PROBE_RESULT},
 };
 
 #define QUIRK_STR_EQUAL(s1, s2)					\
 	(s1 == NULL ||						\
 	(s2 != NULL && strcmp(s1, s2) == 0))
-#define QUIRK_STR_MATCH(s1, s2)					\
+#define QUIRK_STR_STARTSWITH(s1, s2)				\
 	(s1 == NULL ||						\
 	(s2 != NULL && strncmp(s1, s2, strlen(s1)) == 0))
+#define QUIRK_STR_CONTAINS(s1, s2)				\
+	(s1 == NULL ||						\
+	(s2 != NULL && strstr(s2, s1) != NULL))
 
 static int
 atkbdc_getquirks(void)
@@ -152,8 +167,8 @@ atkbdc_getquirks(void)
     for (i = 0; i < nitems(quirks); i++)
 	if (QUIRK_STR_EQUAL(quirks[i].bios_vendor, bios_vendor) &&
 	    QUIRK_STR_EQUAL(quirks[i].maker, maker) &&
-	    QUIRK_STR_EQUAL(quirks[i].product, product) &&
-	    QUIRK_STR_MATCH(quirks[i].version, version))
+	    QUIRK_STR_CONTAINS(quirks[i].product, product) &&
+	    QUIRK_STR_STARTSWITH(quirks[i].version, version))
 		return (quirks[i].quirk);
     /*
      * Some Chromebooks don't conform to the google comment above so do the
