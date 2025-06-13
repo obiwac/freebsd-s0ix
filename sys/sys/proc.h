@@ -930,7 +930,8 @@ struct proc {
 #define	SWT_REMOTEPREEMPT	9	/* Remote processor preempted. */
 #define	SWT_REMOTEWAKEIDLE	10	/* Remote processor preempted idle. */
 #define	SWT_BIND		11	/* Thread bound to a new CPU. */
-#define	SWT_COUNT		12	/* Number of switch types. */
+#define	SWT_TOIDLE		12	/* Switch to the idle thread. */
+#define	SWT_COUNT		13	/* Number of switch types. */
 /* Flags */
 #define	SW_VOL		0x0100		/* Voluntary switch. */
 #define	SW_INVOL	0x0200		/* Involuntary switch. */

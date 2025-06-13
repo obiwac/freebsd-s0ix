@@ -1170,6 +1170,13 @@ tdq_notify(struct tdq *tdq, int lowpri)
 	    (atomic_load_int(&tdq->tdq_cpu_idle) == 0 || cpu_idle_wakeup(cpu)))
 		return;
 
+extern bool s2idle_looping;
+
+	if (s2idle_looping) {
+		printf("Sending IPI_PREEMPT to %d\n", cpu);
+		kdb_backtrace();
+	}
+
 	/*
 	 * The run queues have been updated, so any switch on the remote CPU
 	 * will satisfy the preemption request.
@@ -1412,9 +1419,9 @@ llc:
 		cpu = sched_lowest(ccg, mask, pri, INT_MAX, ts->ts_cpu, r);
 		if (cpu >= 0)
 			SCHED_STAT_INC(pickcpu_intrbind);
-	} else
+	}
 	/* Search the LLC for the least loaded idle CPU we can run now. */
-	if (ccg != NULL) {
+	else if (ccg != NULL) {
 		cpu = sched_lowest(ccg, mask, max(pri, PRI_MAX_TIMESHARE),
 		    INT_MAX, ts->ts_cpu, r);
 		if (cpu >= 0)
@@ -2885,8 +2892,16 @@ sched_affinity(struct thread *td)
 	 * the issue.
 	 */
 	ast_sched_locked(td, TDA_SCHED);
-	if (td != curthread)
+	if (td != curthread) {
 		ipi_cpu(ts->ts_cpu, IPI_PREEMPT);
+
+extern bool s2idle_looping;
+
+		if (s2idle_looping) {
+			printf("Sending IPI_PREEMPT because of affinity change\n");
+			kdb_backtrace();
+		}
+	}
 #endif
 }
 
@@ -3055,7 +3070,8 @@ sched_idletd(void *dummy)
 			atomic_store_int(&tdq->tdq_cpu_idle, 0);
 			continue;
 		}
-		cpu_idle(switchcnt * 4 > sched_idlespinthresh);
+		// cpu_idle(switchcnt * 4 > sched_idlespinthresh);
+		cpu_idle(0);
 		atomic_store_int(&tdq->tdq_cpu_idle, 0);
 
 		/*

@@ -83,6 +83,9 @@ acpi_intr_handler(void *arg)
 	ai = arg;
 	KASSERT(ai != NULL && ai->ai_handler != NULL,
 	    ("invalid ACPI interrupt handler"));
+
+	// printf("%s on CPU %d\n", __func__, curcpu);
+
 	if (ai->ai_handler(ai->ai_context) == ACPI_INTERRUPT_HANDLED)
 		return (FILTER_HANDLED);
 	return (FILTER_STRAY);

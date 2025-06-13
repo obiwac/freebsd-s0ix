@@ -74,6 +74,8 @@ struct acpi_softc {
     int			acpi_enabled;
     enum sleep_type	acpi_stype;
     int			acpi_sleep_disabled;
+    bool		acpi_s2idle_looping;
+    bool		acpi_s2idle_wake;
 
     struct sysctl_ctx_list acpi_sysctl_ctx;
     struct sysctl_oid	*acpi_sysctl_tree;

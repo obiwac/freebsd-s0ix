@@ -234,6 +234,8 @@ acpi_lid_notify_status_changed(void *arg)
     ACPI_VPRINT(sc->lid_dev, acpi_sc, "Lid %s\n",
 		sc->lid_status ? "opened" : "closed");
 
+	printf("==== lid status? %s\n", sc->lid_status ? "opened" : "closed");
+
     if (sc->lid_status == 0)
 	EVENTHANDLER_INVOKE(acpi_sleep_event, acpi_sc->acpi_lid_switch_stype);
     else

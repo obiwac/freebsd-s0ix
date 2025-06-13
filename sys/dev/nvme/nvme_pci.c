@@ -344,7 +344,10 @@ nvme_pci_suspend(device_t dev)
 	struct nvme_controller	*ctrlr;
 
 	ctrlr = DEVICE2SOFTC(dev);
-	return (nvme_ctrlr_suspend(ctrlr));
+	printf("%s ctrlr=%p\n", __func__, ctrlr);
+
+	// return (nvme_ctrlr_suspend(ctrlr));
+	return (0);
 }
 
 static int
@@ -353,5 +356,8 @@ nvme_pci_resume(device_t dev)
 	struct nvme_controller	*ctrlr;
 
 	ctrlr = DEVICE2SOFTC(dev);
-	return (nvme_ctrlr_resume(ctrlr));
+	printf("%s ctrlr=%p\n", __func__, ctrlr);
+
+	// return (nvme_ctrlr_resume(ctrlr));
+	return (0);
 }

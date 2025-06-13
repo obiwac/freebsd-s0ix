@@ -527,7 +527,10 @@ static int	idle_mwait = 1;		/* Use MONITOR/MWAIT for short idle. */
 SYSCTL_INT(_machdep, OID_AUTO, idle_mwait, CTLFLAG_RWTUN, &idle_mwait,
     0, "Use MONITOR/MWAIT for short idle");
 
-static bool
+bool
+cpu_idle_enter(int *statep, int newstate);
+
+bool
 cpu_idle_enter(int *statep, int newstate)
 {
 	KASSERT(atomic_load_int(statep) == STATE_RUNNING,

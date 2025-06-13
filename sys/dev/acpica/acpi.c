@@ -49,6 +49,7 @@
 #include <sys/sbuf.h>
 #include <sys/sched.h>
 #include <sys/smp.h>
+#include <sys/taskqueue.h>
 #include <sys/timetc.h>
 #include <sys/uuid.h>
 
@@ -3206,6 +3207,9 @@ acpi_ReqSleepState(struct acpi_softc *sc, enum sleep_type stype)
     struct apm_clone_data *clone;
     ACPI_STATUS status;
 
+    if (stype == STYPE_SUSPEND)
+	stype = STYPE_SUSPEND_TO_IDLE;
+
     if (stype < STYPE_AWAKE || stype >= STYPE_COUNT)
 	return (EINVAL);
     if (!acpi_supported_stypes[stype])
@@ -3497,11 +3501,33 @@ do_sleep(struct acpi_softc *sc, enum acpi_sleep_state *slp_state,
     *slp_state |= ACPI_SS_SLEPT;
 }
 
+#include <sys/interrupt.h>
+
+static void pr_intr(void) {
+	int const nintrcnt = sintrcnt / sizeof *intrcnt;
+
+	printf("sanity check: %s\n", intrnames);
+
+	for (size_t i = 0; i < nintrcnt; i++) {
+		if (i > sintrnames) {
+			printf("what the fuck\n");
+			break;
+		}
+
+		char* const name = intrnames + 20 * i;
+
+		if (strstr(name, "preempt") == NULL && strstr(name, "ast") == NULL) {
+			continue;
+		}
+
+		printf("%s: %lu\n", name, intrcnt[i]);
+	}
+}
+
 static void
 do_idle(struct acpi_softc *sc, enum acpi_sleep_state *slp_state,
     register_t rflags)
 {
-
     intr_suspend();
 
     /*
@@ -3518,7 +3544,109 @@ do_idle(struct acpi_softc *sc, enum acpi_sleep_state *slp_state,
      */
     intr_enable_src(AcpiGbl_FADT.SciInterrupt);
 
-    cpu_idle(0);
+    // goto test;
+
+    // cpuset_t other_cpus;
+
+    	// TODO #ifdef SMP?
+    	// TODO Maybe we gotta suspend them with cpu_idle then kick them somehow?
+    	// TODO Maybe the stuff for other cores needs to happen outside of intr suspending/resuming
+
+    /*
+     * Make sure every CPU is awake.  This just stores STATE_RUNNING in the
+     * idle state of each CPU's monitor buffer.
+     */
+    struct pcpu *pc;
+
+    extern bool s2idle_looping;
+    s2idle_looping = true;
+    sc->acpi_s2idle_wake = false;
+    sc->acpi_s2idle_looping = true;
+
+    /*
+     * Put all CPUs except for this one in their idle loops by sending them an
+     * idle IPI.
+     */
+    cpuset_t other_cpus = all_cpus;
+    CPU_CLR(curcpu, &other_cpus);
+    // ipi_selected(other_cpus, IPI_IDLE);
+
+    /* Suspend-to-idle loop. */
+    size_t intr_count = 0;
+    for (; /* intr_count < 3 && */ !sc->acpi_s2idle_wake; intr_count++) {
+	/*
+	 * Finally, actually idle the main CPU.  The only thing that will break us
+	 * out of this at this point is an SCI interrupt.
+	 */
+	// sc->acpi_s2idle_looping = true;
+	// DELAY(1000000); // XXX Does this work cuz we syncing the CPUs? maybe they gotta be kicked out of their existing idle loop to enter the new one. wut how that make sense.
+	// smp_rendezvous_cpus(just_me, smp_no_rendezvous_barrier, NULL,
+	//     smp_no_rendezvous_barrier, NULL);
+
+	printf("(0) ENTERING S2IDLE (build #10, intr %zu)\n", intr_count);
+
+    	STAILQ_FOREACH(pc, &cpuhead, pc_allcpu) {
+	    struct monitorbuf *mb = &pc->pc_monitorbuf;
+	    printf("CPU %d (before waiting) idle state = %d\n", pc->pc_cpuid, atomic_load_int(&mb->idle_state));
+    	}
+
+	pr_intr();
+	DELAY(500000);
+	pr_intr();
+
+    	STAILQ_FOREACH(pc, &cpuhead, pc_allcpu) {
+	    struct monitorbuf *mb = &pc->pc_monitorbuf;
+	    printf("CPU %d idle state = %d\n", pc->pc_cpuid, atomic_load_int(&mb->idle_state));
+    	}
+
+	cpu_idle(0);
+
+	extern struct taskqueue *acpi_taskq;
+
+	printf("acpi_taskq->tq_tcount = %d\n", *(int*) ((char*) acpi_taskq + 160));
+	taskqueue_quiesce(acpi_taskq);
+
+	// DELAY(500000); // 500 ms
+	// ipi_selected(other_cpus, IPI_PREEMPT);
+	// DELAY(500000); // 500 ms
+
+	// TODO Check that all CPUs are still idled maybe?
+
+	// smp_rendezvous_cpus(all_cpus, NULL, NULL, rdv_idle, NULL);
+
+	/*
+	cpu_idle(0); // If we pass 1, a fast method will be used (such as C1 mwait or hlt), which isn't enough to enter S0i3.
+
+	// I'm testing that CPU kicking is working here.
+	// If we don't wake in 1s naturally, but we do in 50 ms after kicking, we can safely assume the kicking worked.
+
+	DELAY(1000000);
+	printf("(1) Before kicking CPUs.\n");
+	smp_rendezvous_cpus(other_cpus, smp_no_rendezvous_barrier, NULL,
+	    smp_no_rendezvous_barrier, NULL);
+	DELAY(50000); // 50 ms
+	printf("(1) After kicking CPUs.\n");
+	*/
+
+	// sc->acpi_s2idle_wake = 1; // XXX okay, for some reason, lid events aren't being processed, but the interrupt is breaking out of cpu_idle correctly...
+	//DELAY(100000);
+
+	// smp_rendezvous_cpus(other_cpus, NULL, rdv_routine, NULL, NULL);
+    }
+	// Attempt to kick all cpus out of idle.
+//    smp_rendezvous_cpus(all_cpus, smp_no_rendezvous_barrier, NULL,
+//	smp_no_rendezvous_barrier, NULL);
+
+    /*
+     * Kick all other CPUs by sending them a rendezvous IPI.
+     */
+    printf("(3) Sleep interrupted %zu times. KICKING ALL CPUS\n", intr_count);
+    sc->acpi_s2idle_looping = false;
+    s2idle_looping = false;
+    smp_rendezvous_cpus(other_cpus, smp_no_rendezvous_barrier, NULL,
+	smp_no_rendezvous_barrier, NULL);
+
+// test:
 
     intr_resume(false);
     intr_restore(rflags);
@@ -3538,6 +3666,11 @@ acpi_EnterSleepState(struct acpi_softc *sc, enum sleep_type stype)
     enum acpi_sleep_state slp_state;
 
     ACPI_FUNCTION_TRACE_U32((char *)(uintptr_t)__func__, state);
+
+    if (stype == STYPE_SUSPEND_TO_IDLE) {
+	// Try reloading (?) the busmaster (under what conditions?).
+	sc->acpi_s2idle_looping = true;
+    }
 
     if (stype <= STYPE_AWAKE || stype >= STYPE_COUNT)
 	return_ACPI_STATUS (AE_BAD_PARAMETER);
@@ -3640,7 +3773,6 @@ acpi_EnterSleepState(struct acpi_softc *sc, enum sleep_type stype)
     case STYPE_STANDBY_S2:
 	do_standby(sc, &slp_state, intr);
 	break;
-    case STYPE_SUSPEND:
     case STYPE_HIBERNATE:
 	/*
 	 * Can pass suspend/hibernate enum sleep_type, as they are directly
@@ -3648,6 +3780,7 @@ acpi_EnterSleepState(struct acpi_softc *sc, enum sleep_type stype)
 	 */
 	do_sleep(sc, &slp_state, intr, stype);
 	break;
+    case STYPE_SUSPEND:
     case STYPE_SUSPEND_TO_IDLE:
 	do_idle(sc, &slp_state, intr);
 	break;
@@ -4058,10 +4191,11 @@ acpi_system_eventhandler_sleep(void *arg, enum sleep_type stype)
 static void
 acpi_system_eventhandler_wakeup(void *arg, enum sleep_type stype)
 {
+    struct acpi_softc *sc = (struct acpi_softc *)arg;
 
     ACPI_FUNCTION_TRACE_U32((char *)(uintptr_t)__func__, stype);
 
-    /* Currently, nothing to do for wakeup. */
+    sc->acpi_s2idle_wake = true;
 
     return_VOID;
 }
@@ -4094,6 +4228,8 @@ acpi_event_power_button_sleep(void *context)
 
     ACPI_FUNCTION_TRACE((char *)(uintptr_t)__func__);
 
+    sc->acpi_s2idle_wake = true;
+
 #if defined(__amd64__) || defined(__i386__)
     if (ACPI_FAILURE(AcpiOsExecute(OSL_NOTIFY_HANDLER,
 	acpi_invoke_sleep_eventhandler, &sc->acpi_power_button_stype)))
@@ -4112,6 +4248,8 @@ acpi_event_power_button_wake(void *context)
 
     ACPI_FUNCTION_TRACE((char *)(uintptr_t)__func__);
 
+    sc->acpi_s2idle_wake = true;
+
     if (ACPI_FAILURE(AcpiOsExecute(OSL_NOTIFY_HANDLER,
 	acpi_invoke_wake_eventhandler, &sc->acpi_power_button_stype)))
 	return_VALUE (ACPI_INTERRUPT_NOT_HANDLED);
@@ -4125,6 +4263,8 @@ acpi_event_sleep_button_sleep(void *context)
 
     ACPI_FUNCTION_TRACE((char *)(uintptr_t)__func__);
 
+    sc->acpi_s2idle_wake = true;
+
     if (ACPI_FAILURE(AcpiOsExecute(OSL_NOTIFY_HANDLER,
 	acpi_invoke_sleep_eventhandler, &sc->acpi_sleep_button_stype)))
 	return_VALUE (ACPI_INTERRUPT_NOT_HANDLED);
@@ -4137,6 +4277,8 @@ acpi_event_sleep_button_wake(void *context)
     struct acpi_softc	*sc = (struct acpi_softc *)context;
 
     ACPI_FUNCTION_TRACE((char *)(uintptr_t)__func__);
+
+    sc->acpi_s2idle_wake = true;
 
     if (ACPI_FAILURE(AcpiOsExecute(OSL_NOTIFY_HANDLER,
 	acpi_invoke_wake_eventhandler, &sc->acpi_sleep_button_stype)))

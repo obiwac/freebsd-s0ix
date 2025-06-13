@@ -1667,8 +1667,11 @@ cpususpend_handler(void)
 	}
 
 	/* Wait for resume directive */
-	while (!CPU_ISSET(cpu, &toresume_cpus))
+	while (!CPU_ISSET(cpu, &toresume_cpus)) {
+		// cpu_mwait(MWAIT_INTRBREAK, MWAIT_C4);
+		// cpu_idle(0);
 		ia32_pause();
+	}
 
 	/* Re-apply microcode updates. */
 	ucode_reload();
@@ -1696,6 +1699,8 @@ cpususpend_handler(void)
 	CPU_CLR_ATOMIC(cpu, &toresume_cpus);
 }
 
+bool s2idle_looping = false;
+
 /*
  * Handle an IPI_SWI by waking delayed SWI thread.
  */
@@ -1703,7 +1708,22 @@ void
 ipi_swi_handler(struct trapframe frame)
 {
 
+	if (s2idle_looping)
+		printf("CPU %d received IPI_SWI\n", curcpu);
 	intr_event_handle(clk_intr_event, &frame);
+}
+
+/*
+ * Handle an IPI_IDLE by putting the CPU in an idle loop.
+ */
+void
+ipi_idle_handler(void)
+{
+
+	printf("CPU %d has received an IPI_IDLE\n", curcpu);
+	while (s2idle_looping)
+		cpu_idle(0);
+	printf("CPU %d exited IPI_IDLE\n", curcpu);
 }
 
 /*
