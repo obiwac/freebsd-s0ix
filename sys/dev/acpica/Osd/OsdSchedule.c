@@ -40,6 +40,7 @@
 #include <sys/malloc.h>
 #include <sys/proc.h>
 #include <sys/taskqueue.h>
+#include <sys/cpuset.h>
 
 #include <contrib/dev/acpica/include/acpi.h>
 #include <contrib/dev/acpica/include/accommon.h>
@@ -109,10 +110,13 @@ static void
 acpi_taskq_init(void *arg)
 {
     int i;
+    cpuset_t just_cpu0;
 
+    CPU_SETOF(0, &just_cpu0);
     acpi_taskq = taskqueue_create_fast("acpi_task", M_NOWAIT,
 	&taskqueue_thread_enqueue, &acpi_taskq);
-    taskqueue_start_threads(&acpi_taskq, acpi_max_threads, PWAIT, "acpi_task");
+    taskqueue_start_threads_cpuset(&acpi_taskq, acpi_max_threads, PWAIT,
+	&just_cpu0, "acpi_task");
     if (acpi_task_count > 0) {
 	if (bootverbose)
 	    printf("AcpiOsExecute: enqueue %d pending tasks\n",

@@ -55,6 +55,16 @@
 
 #include <dev/hid/hconf.h>
 
+/*
+#undef DPRINTF
+#define DPRINTF printf
+#undef DPRINTFN
+#define DPRINTFN(level, fmt, args...) do {		\
+	if (hmt_debug >= (level))			\
+		printf("%s: " fmt, __func__, ## args); \
+} while (0)
+*/
+
 static SYSCTL_NODE(_hw_hid, OID_AUTO, hmt, CTLFLAG_RW, 0,
     "MSWindows 7/8/10 compatible HID Multi-touch Device");
 #ifdef HID_DEBUG
@@ -470,6 +480,8 @@ hmt_detach(device_t dev)
 	return (0);
 }
 
+#include <sys/time.h>
+
 static void
 hmt_intr(void *context, void *buf, hid_size_t len)
 {
@@ -486,6 +498,10 @@ hmt_intr(void *context, void *buf, hid_size_t len)
 	uint32_t scan_time;
 	int32_t delta;
 	uint8_t id;
+
+	struct timespec ts;
+	getnanouptime(&ts);
+	// printf("%s %lu:%lu\n", __func__, ts.tv_sec, ts.tv_nsec);
 
 #ifdef IICHID_SAMPLING
 	/*
@@ -506,7 +522,7 @@ hmt_intr(void *context, void *buf, hid_size_t len)
 	/* Ignore irrelevant reports */
 	id = sc->report_id != 0 ? *(uint8_t *)buf : 0;
 	if (sc->report_id != id) {
-		DPRINTF("Skip report with unexpected ID: %hhu\n", id);
+		printf("Skip report with unexpected ID: %hhu\n", id);
 		return;
 	}
 

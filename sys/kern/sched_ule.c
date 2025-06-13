@@ -292,6 +292,7 @@ struct tdq {
 	 */
 	u_char		tdq_ts_ticks;
 	int		tdq_id;		/* (c) cpuid. */
+	int		tdq_do_idle;
 	struct runq	tdq_runq;	/* (t) Run queue. */
 	char		tdq_name[TDQ_NAME_LEN];
 #ifdef KTR
@@ -1499,9 +1500,9 @@ llc:
 		cpu = sched_lowest(ccg, mask, pri, INT_MAX, ts->ts_cpu, r);
 		if (cpu >= 0)
 			SCHED_STAT_INC(pickcpu_intrbind);
-	} else
+	}
 	/* Search the LLC for the least loaded idle CPU we can run now. */
-	if (ccg != NULL) {
+	else if (ccg != NULL) {
 		cpu = sched_lowest(ccg, mask, max(pri, PRI_MAX_TIMESHARE),
 		    INT_MAX, ts->ts_cpu, r);
 		if (cpu >= 0)
@@ -1575,6 +1576,8 @@ tdq_choose(struct tdq *tdq)
 	struct thread *td;
 
 	TDQ_LOCK_ASSERT(tdq, MA_OWNED);
+	if (__predict_false(tdq->tdq_do_idle))
+		return (NULL); /* Return NULL for idle thread */
 	td = runq_choose_realtime(&tdq->tdq_runq);
 	if (td != NULL)
 		return (td);
@@ -2660,16 +2663,11 @@ sched_exit_thread(struct thread *td, struct thread *child)
 	thread_unlock(td);
 }
 
-void
-sched_preempt(struct thread *td)
+static bool
+sched_preempt_locked(struct tdq *tdq, struct thread *td)
 {
-	struct tdq *tdq;
 	int flags;
 
-	SDT_PROBE2(sched, , , surrender, td, td->td_proc);
-
-	thread_lock(td);
-	tdq = TDQ_SELF();
 	TDQ_LOCK_ASSERT(tdq, MA_OWNED);
 	if (td->td_priority > tdq->tdq_lowpri) {
 		if (td->td_critnest == 1) {
@@ -2678,13 +2676,39 @@ sched_preempt(struct thread *td)
 			    SWT_REMOTEPREEMPT;
 			mi_switch(flags);
 			/* Switch dropped thread lock. */
-			return;
+			return (true);
 		}
 		td->td_owepreempt = 1;
 	} else {
 		tdq->tdq_owepreempt = 0;
 	}
-	thread_unlock(td);
+	return (false);
+}
+
+void
+sched_preempt(struct thread *td)
+{
+	struct tdq *tdq;
+
+	SDT_PROBE2(sched, , , surrender, td, td->td_proc);
+
+	thread_lock(td);
+	tdq = TDQ_SELF();
+	if (!sched_preempt_locked(tdq, td))
+		thread_unlock(td);
+}
+
+void
+sched_do_idle(struct thread *td, bool do_idle)
+{
+	struct tdq *tdq;
+
+	thread_lock(td);
+	tdq = TDQ_SELF();
+	TDQ_LOCK_ASSERT(tdq, MA_OWNED);
+	tdq->tdq_do_idle = do_idle;
+	if (!sched_preempt_locked(tdq, td))
+		thread_unlock(td);
 }
 
 /*
@@ -2836,11 +2860,15 @@ struct thread *
 sched_choose(void)
 {
 	struct thread *td;
+	struct thread *idle_td;
 	struct tdq *tdq;
 
 	tdq = TDQ_SELF();
 	TDQ_LOCK_ASSERT(tdq, MA_OWNED);
+	idle_td = PCPU_GET(idlethread);
 	td = tdq_choose(tdq);
+	KASSERT(td != idle_td, ("sched_choose: idle thread explicitly "
+	    "returned; tdq_choose should return NULL instead"));
 	if (td != NULL) {
 		tdq_runq_rem(tdq, td);
 		tdq->tdq_lowpri = td->td_priority;
