@@ -128,13 +128,16 @@
 #define IPI_PREEMPT     1
 #define IPI_HARDCLOCK   2
 #define	IPI_TRACE	3	/* Collect stack trace. */
-#define	IPI_BITMAP_LAST IPI_TRACE
+#define IPI_IDLE2	4	/* Idle scheduler. */
+#define IPI_UNIDLE	5	/* Unidle scheduler. */
+#define	IPI_BITMAP_LAST IPI_UNIDLE
 #define IPI_IS_BITMAPED(x) ((x) <= IPI_BITMAP_LAST)
 
 #define	IPI_STOP	(APIC_IPI_INTS + 6)	/* Stop CPU until restarted. */
 #define	IPI_SUSPEND	(APIC_IPI_INTS + 7)	/* Suspend CPU until restarted. */
 #define	IPI_SWI		(APIC_IPI_INTS + 8)	/* Run clk_intr_event. */
 #define	IPI_DYN_FIRST	(APIC_IPI_INTS + 9)
+#define	IPI_IDLE	(APIC_IPI_INTS + 10)	/* Put CPU into idle loop. */
 #define	IPI_DYN_LAST	(254)			/* IPIs allocated at runtime */
 
 /*

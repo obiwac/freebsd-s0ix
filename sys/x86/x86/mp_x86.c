@@ -1369,6 +1369,12 @@ ipi_bitmap_handler(struct trapframe frame)
 #endif
 		hardclockintr();
 	}
+	if (ipi_bitmap & (1 << IPI_IDLE2)) {
+		sched_do_idle(td, true);
+	}
+	if (ipi_bitmap & (1 << IPI_UNIDLE)) {
+		sched_do_idle(td, false);
+	}
 	td->td_intr_frame = oldframe;
 	td->td_intr_nesting_level--;
 	if (ipi_bitmap & (1 << IPI_HARDCLOCK))
@@ -1696,6 +1702,8 @@ cpususpend_handler(void)
 	CPU_CLR_ATOMIC(cpu, &toresume_cpus);
 }
 
+bool s2idle_looping = false;
+
 /*
  * Handle an IPI_SWI by waking delayed SWI thread.
  */
@@ -1703,7 +1711,32 @@ void
 ipi_swi_handler(struct trapframe frame)
 {
 
+	if (s2idle_looping)
+		printf("CPU %d received IPI_SWI\n", curcpu);
 	intr_event_handle(clk_intr_event, &frame);
+}
+
+#include <sys/pcpu.h>
+
+/*
+ * Handle an IPI_IDLE by putting the CPU in an idle loop.
+ */
+void
+ipi_idle_handler(void)
+{
+
+	printf("CPU %d has received an IPI_IDLE\n", curcpu);
+	struct pcpu *pc = pcpu_find(curcpu);
+
+	if (atomic_load_int(&pc->pc_monitorbuf.idle_state) != 0 /* STATE_RUNNING */) {
+		printf("CPU %d already idling\n", curcpu);
+		return;
+	}
+
+
+// 	while (s2idle_looping)
+		cpu_idle(0);
+	printf("CPU %d exited IPI_IDLE\n", curcpu);
 }
 
 /*

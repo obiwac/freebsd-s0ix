@@ -64,6 +64,8 @@ __FBSDID("$FreeBSD$");
 #include <dev/thunderbolt/tb_dev.h>
 #include <dev/thunderbolt/tb_ioctl.h>
 
+MALLOC_DEFINE(M_THUNDERBOLT, "thunderbolt", "memory for thunderbolt");
+
 struct tbdev_if;
 struct tbdev_dm;
 struct tbdev_rt;

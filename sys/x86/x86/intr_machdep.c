@@ -186,6 +186,7 @@ intr_init_sources(void *arg)
 	if (mp_ncpus > 1)
 		nintrcnt += 8 * mp_ncpus;
 #endif
+	printf("nintrcnt %d\n", nintrcnt);
 	intrcnt = mallocarray(nintrcnt, sizeof(u_long), M_INTR, M_WAITOK |
 	    M_ZERO);
 	intrnames = mallocarray(nintrcnt, INTRNAME_LEN, M_INTR, M_WAITOK |

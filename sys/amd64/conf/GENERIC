@@ -24,6 +24,7 @@ makeoptions	DEBUG=-g		# Build kernel with gdb(1) debug symbols
 makeoptions	WITH_CTF=1		# Run ctfconvert(1) for DTrace support
 
 options 	SCHED_ULE		# ULE scheduler
+# options 	SCHED_4BSD		# 4BSD scheduler
 options 	NUMA			# Non-Uniform Memory Architecture support
 options 	PREEMPTION		# Enable kernel thread preemption
 options 	BLOAT_KERNEL_WITH_EXTERR
@@ -391,3 +392,8 @@ options 	U2F_MAKE_UHID_ALIAS	# install /dev/uhid alias for /dev/u2f/
 # EFI devices
 device		efidev			# EFI pseudo-device
 device		efirtc			# EFI RTC
+
+options		COUNT_IPIS
+options		KBDIO_DEBUG=6
+options		KTR
+# options		KASAN

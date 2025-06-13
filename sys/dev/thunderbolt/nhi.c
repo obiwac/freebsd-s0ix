@@ -426,7 +426,7 @@ int
 nhi_resume(struct nhi_softc *sc)
 {
 
-	return (0);
+	return (tb_router_resume(sc->root_rsc));
 }
 
 static void

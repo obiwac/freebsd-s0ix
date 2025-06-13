@@ -212,6 +212,15 @@ IDTVEC(spuriousint)
 	call	ipi_swi_handler
 	KMSAN_LEAVE
 	jmp	doreti
+/*
+ * Executed by a CPU when it receives an IPI_IDLE.
+ */
+	INTR_HANDLER ipi_idle
+	call	as_lapic_eoi
+	KMSAN_ENTER
+	call	ipi_idle_handler
+	KMSAN_LEAVE
+	jmp	doreti
 
 /*
  * Executed by a CPU when it receives a RENDEZVOUS IPI from another CPU.

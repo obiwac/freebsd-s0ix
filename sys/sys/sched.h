@@ -147,6 +147,7 @@ struct thread *sched_choose(void);
 void	sched_clock(struct thread *td, int cnt);
 void	sched_idletd(void *);
 void	sched_preempt(struct thread *td);
+void	sched_do_idle(struct thread *td, bool do_idle);
 void	sched_relinquish(struct thread *td);
 void	sched_rem(struct thread *td);
 void	sched_wakeup(struct thread *td, int srqflags);
