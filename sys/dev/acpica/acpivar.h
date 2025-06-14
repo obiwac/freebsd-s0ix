@@ -47,23 +47,42 @@
 #include <machine/bus.h>
 #include <machine/resource.h>
 
+enum sleep_type {
+    /*
+     * Map these with ACPI S-states the best we can.  We want to be able to
+     * assign an S-state to an enum sleep_type.  The other way round is
+     * impossible though, as we may support additional non-S-state sleep types
+     * in the future.
+     */
+    STYPE_AWAKE		= ACPI_STATE_S0,
+    STYPE_STANDBY	= ACPI_STATE_S1,
+    STYPE_STANDBY_S2	= ACPI_STATE_S2,
+    STYPE_SUSPEND	= ACPI_STATE_S3,
+    STYPE_HIBERNATE	= ACPI_STATE_S4,
+    STYPE_POWEROFF	= ACPI_STATE_S5,
+    STYPE_COUNT,
+    STYPE_UNKNOWN	= ACPI_STATE_UNKNOWN,
+};
+
+CTASSERT(STYPE_COUNT == 6);
+
 struct apm_clone_data;
 struct acpi_softc {
     device_t		acpi_dev;
     struct cdev		*acpi_dev_t;
 
     int			acpi_enabled;
-    int			acpi_sstate;
+    enum sleep_type	acpi_stype;
     int			acpi_sleep_disabled;
 
     struct sysctl_ctx_list acpi_sysctl_ctx;
     struct sysctl_oid	*acpi_sysctl_tree;
-    int			acpi_power_button_sx;
-    int			acpi_sleep_button_sx;
-    int			acpi_lid_switch_sx;
+    enum sleep_type	acpi_power_button_stype;
+    enum sleep_type	acpi_sleep_button_stype;
+    enum sleep_type	acpi_lid_switch_stype;
 
-    int			acpi_standby_sx;
-    int			acpi_suspend_sx;
+    enum sleep_type	acpi_standby_stype;
+    enum sleep_type	acpi_suspend_stype;
 
     int			acpi_sleep_delay;
     int			acpi_s4bios;
@@ -74,7 +93,7 @@ struct acpi_softc {
     vm_offset_t		acpi_wakeaddr;
     vm_paddr_t		acpi_wakephys;
 
-    int			acpi_next_sstate;	/* Next suspend Sx state. */
+    enum sleep_type	acpi_next_stype;	/* Next suspend sleep type. */
     struct apm_clone_data *acpi_clone;		/* Pseudo-dev for devd(8). */
     STAILQ_HEAD(,apm_clone_data) apm_cdevs;	/* All apm/apmctl/acpi cdevs. */
     struct callout	susp_force_to;		/* Force suspend if no acks. */
@@ -411,7 +430,7 @@ ACPI_STATUS	acpi_EvaluateOSC(ACPI_HANDLE handle, uint8_t *uuid,
 		    uint32_t *caps_out, bool query);
 ACPI_STATUS	acpi_OverrideInterruptLevel(UINT32 InterruptNumber);
 ACPI_STATUS	acpi_SetIntrModel(int model);
-int		acpi_ReqSleepState(struct acpi_softc *sc, int state);
+int		acpi_ReqSleepState(struct acpi_softc *sc, enum sleep_type stype);
 int		acpi_AckSleepState(struct apm_clone_data *clone, int error);
 ACPI_STATUS	acpi_SetSleepState(struct acpi_softc *sc, int state);
 int		acpi_wake_set_enable(device_t dev, int enable);
