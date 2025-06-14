@@ -44,6 +44,7 @@ enum amdsmu_res {
 
 enum amdsmu_msg {
 	SMU_MSG_GETSMUVERSION		= 0x02,
+	SMU_MSG_SLEEP_HINT		= 0x03,
 	SMU_MSG_LOG_GETDRAM_ADDR_HI	= 0x04,
 	SMU_MSG_LOG_GETDRAM_ADDR_LO	= 0x05,
 	SMU_MSG_LOG_START		= 0x06,
@@ -471,6 +472,29 @@ amdsmu_dump_metrics(device_t dev)
 }
 
 static int
+amdsmu_enter(device_t dev)
+{
+
+	if (amdsmu_cmd(dev, SMU_MSG_SLEEP_HINT, true, NULL) != 0) {
+		device_printf(dev, "failed to hint to SMU to enter sleep");
+		return (-1);
+	}
+	return (0);
+}
+
+static int
+amdsmu_exit(device_t dev)
+{
+
+	if (amdsmu_cmd(dev, SMU_MSG_SLEEP_HINT, false, NULL) != 0) {
+		device_printf(dev, "failed to hint to SMU to exit sleep");
+		return (-1);
+	}
+	amdsmu_dump_metrics(dev);
+	return (0);
+}
+
+static int
 amdsmu_attach(device_t dev)
 {
 	struct amdsmu_softc	*sc = device_get_softc(dev);
@@ -550,6 +574,8 @@ static device_method_t amdsmu_methods[] = {
 	DEVMETHOD(device_probe,		amdsmu_probe),
 	DEVMETHOD(device_attach,	amdsmu_attach),
 	DEVMETHOD(device_detach,	amdsmu_detach),
+	DEVMETHOD(device_amdsmu_enter_sleep,	amdsmu_enter),
+	DEVMETHOD(device_amdsmu_exit_sleep,	amdsmu_exit),
 	DEVMETHOD_END
 };
 

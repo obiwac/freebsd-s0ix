@@ -3370,13 +3370,52 @@ acpi_sleep_disable(struct acpi_softc *sc)
 }
 
 enum acpi_sleep_state {
-    ACPI_SS_NONE	= 0,
-    ACPI_SS_GPE_SET	= 1 << 0,
-    ACPI_SS_DEV_SUSPEND	= 1 << 1,
-    ACPI_SS_SPMC_ENTER	= 1 << 2,
-    ACPI_SS_SLP_PREP	= 1 << 3,
-    ACPI_SS_SLEPT	= 1 << 4,
+    ACPI_SS_NONE		= 0,
+    ACPI_SS_GPE_SET		= 1 << 0,
+    ACPI_SS_DEV_SUSPEND		= 1 << 1,
+    ACPI_SS_SPMC_ENTER		= 1 << 2,
+    ACPI_SS_AMDSMU_ENTER	= 1 << 3,
+    ACPI_SS_SLP_PREP		= 1 << 4,
+    ACPI_SS_SLEPT		= 1 << 5,
 };
+
+static int
+acpi_amdsmu_get_device(struct acpi_softc *sc, device_t *dev)
+{
+    devclass_t	amdsmu_dc = devclass_find("amdsmu");
+
+    MPASS(dev != NULL);
+    if (amdsmu_dc == NULL) {
+	device_printf(sc->acpi_dev, "amdsmu device class not found\n");
+	return (ENXIO);
+    }
+    *dev = devclass_get_device(amdsmu_dc, 0);
+    if (*dev == NULL) {
+	device_printf(sc->acpi_dev, "no amdsmu device found\n");
+	return (ENXIO);
+    }
+    return (0);
+}
+
+static int
+acpi_amdsmu_enter(struct acpi_softc *sc)
+{
+    device_t	amdsmu;
+
+    if (acpi_amdsmu_get_device(sc, &amdsmu) != 0)
+	return (ENXIO);
+    return (DEVICE_AMDSMU_ENTER_SLEEP(amdsmu));
+}
+
+static int
+acpi_amdsmu_exit(struct acpi_softc *sc)
+{
+    device_t	amdsmu;
+
+    if (acpi_amdsmu_get_device(sc, &amdsmu) != 0)
+	return (ENXIO);
+    return (DEVICE_AMDSMU_EXIT_SLEEP(amdsmu));
+}
 
 static void
 do_standby(struct acpi_softc *sc, enum acpi_sleep_state *slp_state,
@@ -3578,6 +3617,8 @@ acpi_EnterSleepState(struct acpi_softc *sc, enum sleep_type stype)
 	else
 	    slp_state |= ACPI_SS_SPMC_ENTER;
     }
+    if (acpi_amdsmu_enter(sc) == 0)
+	slp_state |= ACPI_SS_AMDSMU_ENTER;
 
     if (stype != STYPE_SUSPEND_TO_IDLE) {
 	status = AcpiEnterSleepStatePrep(stype);
@@ -3630,6 +3671,10 @@ backout:
 	acpi_wake_prep_walk(stype);
 	sc->acpi_stype = STYPE_AWAKE;
 	slp_state &= ~ACPI_SS_GPE_SET;
+    }
+    if (slp_state & ACPI_SS_AMDSMU_ENTER) {
+	acpi_amdsmu_exit(sc);
+	slp_state &= ~ACPI_SS_AMDSMU_ENTER;
     }
     if (slp_state & ACPI_SS_SPMC_ENTER) {
 	MPASS(sc->acpi_spmc_device != NULL);
