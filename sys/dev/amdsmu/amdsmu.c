@@ -290,6 +290,32 @@ amdsmu_fetch_idlemask(device_t dev)
 }
 
 static int
+amdsmu_enter(device_t dev)
+{
+	int err;
+
+	err = amdsmu_cmd(dev, SMU_MSG_SLEEP_HINT, true, NULL);
+	if (err != 0) {
+		device_printf(dev, "failed to hint to SMU to enter sleep");
+		return (err);
+	}
+	return (0);
+}
+
+static int
+amdsmu_exit(device_t dev)
+{
+	int err;
+
+	err = amdsmu_cmd(dev, SMU_MSG_SLEEP_HINT, false, NULL);
+	if (err != 0) {
+		device_printf(dev, "failed to hint to SMU to exit sleep");
+		return (err);
+	}
+	return (amdsmu_dump_metrics(dev));
+}
+
+static int
 amdsmu_attach(device_t dev)
 {
 	struct amdsmu_softc *sc = device_get_softc(dev);
@@ -450,6 +476,8 @@ static device_method_t amdsmu_methods[] = {
 	DEVMETHOD(device_probe,		amdsmu_probe),
 	DEVMETHOD(device_attach,	amdsmu_attach),
 	DEVMETHOD(device_detach,	amdsmu_detach),
+	DEVMETHOD(device_amdsmu_enter_sleep,	amdsmu_enter),
+	DEVMETHOD(device_amdsmu_exit_sleep,	amdsmu_exit),
 	DEVMETHOD_END
 };
 
