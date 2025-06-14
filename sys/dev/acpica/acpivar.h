@@ -51,8 +51,7 @@ enum sleep_type {
     /*
      * Map these with ACPI S-states the best we can.  We want to be able to
      * assign an S-state to an enum sleep_type.  The other way round is
-     * impossible though, as we may support additional non-S-state sleep types
-     * in the future.
+     * impossible though, as we support additional non-S-state sleep types.
      */
     STYPE_AWAKE		= ACPI_STATE_S0,
     STYPE_STANDBY	= ACPI_STATE_S1,
@@ -60,11 +59,12 @@ enum sleep_type {
     STYPE_SUSPEND	= ACPI_STATE_S3,
     STYPE_HIBERNATE	= ACPI_STATE_S4,
     STYPE_POWEROFF	= ACPI_STATE_S5,
+    STYPE_SUSPEND_TO_IDLE,
     STYPE_COUNT,
     STYPE_UNKNOWN	= ACPI_STATE_UNKNOWN,
 };
 
-CTASSERT(STYPE_COUNT == 6);
+CTASSERT(STYPE_COUNT == 7);
 
 struct apm_clone_data;
 struct acpi_softc {

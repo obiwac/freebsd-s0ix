@@ -123,7 +123,7 @@ Some newer systems require use of this register, while some only work
 with legacy rebooting support.
 .It Va hw.acpi.lid_switch_state
 Suspend state
-.Pq Li S1 Ns \[en] Ns Li S5
+.Pq Li S1 Ns \[en] Ns Li S5 and s2idle
 to enter when the lid switch (i.e., a notebook screen) is closed, or
 .Dq Li NONE
 .Pq do nothing .
@@ -131,7 +131,7 @@ Default is
 .Dq Li NONE .
 .It Va hw.acpi.power_button_state
 Suspend state
-.Pq Li S1 Ns \[en] Ns Li S5
+.Pq Li S1 Ns \[en] Ns Li S5 and s2idle
 to enter when the power button is pressed, or
 .Dq Li NONE
 .Pq do nothing .
@@ -153,7 +153,7 @@ Most current systems do not support
 .Li S4BIOS .
 .It Va hw.acpi.sleep_button_state
 Suspend state
-.Pq Li S1 Ns \[en] Ns Li S5
+.Pq Li S1 Ns \[en] Ns Li S5 and s2idle
 to enter when the sleep button is pressed.
 This is usually a special function button on the keyboard.
 Default is
@@ -165,7 +165,7 @@ actually entering the suspend state.
 Default is 1 second.
 .It Va hw.acpi.supported_sleep_state
 Suspend states
-.Pq Li S1 Ns \[en] Ns Li S5
+.Pq Li S1 Ns \[en] Ns Li S5 and s2idle
 supported by the BIOS.
 .Bl -tag -width indent
 .It Li S1
@@ -191,6 +191,16 @@ unless
 is available.
 .It Li S5
 System shuts down cleanly and powers off.
+.It Li s2idle
+Suspend to idle.
+This is similar to
+.Li S3
+(suspend-to-RAM), except that the ACPI sleep state stays
+.Li S0
+and the CPU is put into an idle loop instead.
+This is useful for systems that support modern standby (S0ix), which needs the
+CPU to be idle and devices to be suspended to enter low power states such as
+S0i3.
 .El
 .It Va hw.acpi.verbose
 Enable verbose printing from the various ACPI subsystems.
