@@ -3434,8 +3434,9 @@ enum acpi_sleep_state {
     ACPI_SS_NONE	= 0,
     ACPI_SS_GPE_SET	= 1 << 0,
     ACPI_SS_DEV_SUSPEND	= 1 << 1,
-    ACPI_SS_SLP_PREP	= 1 << 2,
-    ACPI_SS_SLEPT	= 1 << 3,
+    ACPI_SS_SPMC_ENTER	= 1 << 2,
+    ACPI_SS_SLP_PREP	= 1 << 3,
+    ACPI_SS_SLEPT	= 1 << 4,
 };
 
 static void
@@ -3634,6 +3635,14 @@ acpi_EnterSleepState(struct acpi_softc *sc, enum power_stype stype)
     slp_state |= ACPI_SS_DEV_SUSPEND;
     AcpiOsSleep(1000);
 
+    if (sc->acpi_spmc_device != NULL) {
+	MPASS(sc->acpi_spmc_enter != NULL);
+	if (sc->acpi_spmc_enter(sc->acpi_spmc_device) != 0)
+	    device_printf(sc->acpi_dev, "failed to run SPMC entry\n");
+	else
+	    slp_state |= ACPI_SS_SPMC_ENTER;
+    }
+
     if (stype != POWER_STYPE_SUSPEND_TO_IDLE) {
 	status = AcpiEnterSleepStatePrep(acpi_sstate);
 	if (ACPI_FAILURE(status)) {
@@ -3680,6 +3689,13 @@ backout:
 	acpi_wake_prep_walk(sc, stype);
 	sc->acpi_stype = POWER_STYPE_AWAKE;
 	slp_state &= ~ACPI_SS_GPE_SET;
+    }
+    if (slp_state & ACPI_SS_SPMC_ENTER) {
+	MPASS(sc->acpi_spmc_device != NULL);
+	MPASS(sc->acpi_spmc_exit != NULL);
+	if (sc->acpi_spmc_exit(sc->acpi_spmc_device) != 0)
+	    device_printf(sc->acpi_dev, "failed to run SPMC exit\n");
+	slp_state &= ~ACPI_SS_SPMC_ENTER;
     }
     if (slp_state & ACPI_SS_DEV_SUSPEND) {
 	DEVICE_RESUME(root_bus);
