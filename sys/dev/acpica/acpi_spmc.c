@@ -524,8 +524,8 @@ acpi_spmc_entry_notif(device_t dev)
 	if (sc->dsm_sets & DSM_SET_INTEL)
 		acpi_spmc_run_dsm(dev, &intel_dsm_uuid, DSM_ENTRY_NOTIF);
 	if (sc->dsm_sets & DSM_SET_MS) {
-		acpi_spmc_run_dsm(dev, &ms_dsm_uuid, DSM_ENTRY_NOTIF);
 		acpi_spmc_run_dsm(dev, &ms_dsm_uuid, DSM_MODERN_ENTRY_NOTIF);
+		acpi_spmc_run_dsm(dev, &ms_dsm_uuid, DSM_ENTRY_NOTIF);
 	}
 	if (sc->dsm_sets & DSM_SET_AMD)
 		acpi_spmc_run_dsm(dev, &amd_dsm_uuid, AMD_DSM_ENTRY_NOTIF);
@@ -539,8 +539,8 @@ acpi_spmc_exit_notif(device_t dev)
 	if (sc->dsm_sets & DSM_SET_INTEL)
 		acpi_spmc_run_dsm(dev, &intel_dsm_uuid, DSM_EXIT_NOTIF);
 	if (sc->dsm_sets & DSM_SET_MS) {
-		acpi_spmc_run_dsm(dev, &ms_dsm_uuid, DSM_EXIT_NOTIF);
 		acpi_spmc_run_dsm(dev, &ms_dsm_uuid, DSM_MODERN_EXIT_NOTIF);
+		acpi_spmc_run_dsm(dev, &ms_dsm_uuid, DSM_EXIT_NOTIF);
 	}
 	if (sc->dsm_sets & DSM_SET_AMD)
 		acpi_spmc_run_dsm(dev, &amd_dsm_uuid, AMD_DSM_EXIT_NOTIF);
