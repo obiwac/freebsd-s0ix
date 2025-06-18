@@ -339,7 +339,7 @@ tb_router_detach(struct router_softc *sc)
 	mtx_destroy(&sc->mtx);
 
 	if (sc->adapters != NULL)
-		free(sc, M_THUNDERBOLT);
+		free(sc->adapters, M_THUNDERBOLT);
 
 	if (sc != NULL)
 		free(sc, M_THUNDERBOLT);
@@ -1015,7 +1015,7 @@ router_hotplug_ack(struct router_softc *sc, struct tb_cfg_hotplug *event,
 		tb_debug(sc, DBG_ROUTER, "nhi ring error "
 		    "%d\n", err);
 	mtx_unlock(&sc->mtx);
-	router_free_cmd(sc, cmd);
+	/* Don't call router_free_cmd! */
 }
 
 static void

@@ -64,8 +64,6 @@ __FBSDID("$FreeBSD$");
 #include <dev/thunderbolt/tb_dev.h>
 #include <dev/thunderbolt/tb_ioctl.h>
 
-MALLOC_DEFINE(M_THUNDERBOLT, "thunderbolt", "memory for thunderbolt");
-
 struct tbdev_if;
 struct tbdev_dm;
 struct tbdev_rt;
@@ -101,6 +99,8 @@ static TAILQ_HEAD(, tbdev_rt) tbrouter_head = TAILQ_HEAD_INITIALIZER(tbrouter_he
 static struct mtx tbdev_mtx;
 MTX_SYSINIT(tbdev_mtx, &tbdev_mtx, "TBT Device Mutex", MTX_DEF);
 
+MALLOC_DEFINE(M_THUNDERBOLT, "thunderbolt", "memory for thunderbolt");
+
 static void
 tbdev_init(void *arg)
 {
@@ -122,7 +122,6 @@ tbdev_uninit(void *arg)
 		destroy_dev(tb_dev);
 		tb_dev = NULL;
 	}
-	mtx_destroy(&tbdev_mtx);
 }
 
 SYSUNINIT(tbdev_uninit, SI_SUB_KICK_SCHEDULER, SI_ORDER_ANY, tbdev_uninit, NULL);

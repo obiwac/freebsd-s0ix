@@ -85,7 +85,7 @@ SYSCTL_NODE(_hw, OID_AUTO, nhi, CTLFLAG_RD, 0, "NHI Driver Parameters");
 MALLOC_DEFINE(M_NHI, "nhi", "nhi driver memory");
 
 #ifndef NHI_DEBUG_LEVEL
-#define NHI_DEBUG_LEVEL 0
+#define NHI_DEBUG_LEVEL (DBG_ROUTER | DBG_EXTRA)
 #endif
 
 /* 0 = default, 1 = force-on, 2 = force-off */

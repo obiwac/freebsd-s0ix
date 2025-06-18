@@ -275,8 +275,9 @@ nhi_alloc_tx_frame_locked(struct nhi_ring_pair *r)
 static __inline void
 nhi_free_tx_frame_locked(struct nhi_ring_pair *r, struct nhi_cmd_frame *cmd)
 {
-	/* Clear all flags except for MAPPED */
-	cmd->flags = 0;
+
+	/* Clear all flags except for MAPPED. */
+	cmd->flags &= CMD_MAPPED;
 	cmd->resp_buffer = NULL;
 	TAILQ_INSERT_TAIL(&r->tx_head, cmd, cm_link);
 }
