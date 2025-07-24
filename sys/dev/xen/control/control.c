@@ -175,12 +175,16 @@ xctrl_suspend(void)
 	cpuset_t cpu_suspend_map;
 #endif
 
-	EVENTHANDLER_INVOKE(power_suspend_early);
+	/*
+	 * TODO Once enum sleep_type is made available on non-ACPI, this should
+	 * be STYPE_SUSPEND instead.
+	 */
+	EVENTHANDLER_INVOKE(power_suspend_early, 0);
 	xs_lock();
 	stop_all_proc();
 	xs_unlock();
 	suspend_all_fs();
-	EVENTHANDLER_INVOKE(power_suspend);
+	EVENTHANDLER_INVOKE(power_suspend, 0);
 
 #ifdef EARLY_AP_STARTUP
 	MPASS(mp_ncpus == 1 || smp_started);
@@ -297,7 +301,7 @@ xctrl_suspend(void)
 	resume_all_fs();
 	resume_all_proc();
 
-	EVENTHANDLER_INVOKE(power_resume);
+	EVENTHANDLER_INVOKE(power_resume, 0);
 
 	if (bootverbose)
 		printf("System resumed after suspension\n");

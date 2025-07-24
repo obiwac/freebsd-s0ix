@@ -200,8 +200,13 @@ EVENTHANDLER_DECLARE(shutdown_pre_sync, shutdown_fn);	/* before fs sync */
 EVENTHANDLER_DECLARE(shutdown_post_sync, shutdown_fn);	/* after fs sync */
 EVENTHANDLER_DECLARE(shutdown_final, shutdown_fn);
 
-/* Power state change events */
-typedef void (*power_change_fn)(void *);
+/*
+ * Power state change events.
+ *
+ * TODO Maybe enum sleep_type shouldn't be defined in dev/acpica/acpivar.h, cuz
+ * then I can't use it here/on non-ACPI systems.
+ */
+typedef void (*power_change_fn)(void *, int stype);
 EVENTHANDLER_DECLARE(power_resume, power_change_fn);
 EVENTHANDLER_DECLARE(power_suspend, power_change_fn);
 EVENTHANDLER_DECLARE(power_suspend_early, power_change_fn);

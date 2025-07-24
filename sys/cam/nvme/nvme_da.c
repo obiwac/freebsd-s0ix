@@ -159,7 +159,7 @@ static	void		ndadone(struct cam_periph *periph,
 static  int		ndaerror(union ccb *ccb, uint32_t cam_flags,
 				uint32_t sense_flags);
 static void		ndashutdown(void *arg, int howto);
-static void		ndasuspend(void *arg);
+static void		ndasuspend(void *arg, int stype);
 
 #ifndef	NDA_DEFAULT_SEND_ORDERED
 #define	NDA_DEFAULT_SEND_ORDERED	1
@@ -1365,7 +1365,7 @@ ndashutdown(void *arg, int howto)
 }
 
 static void
-ndasuspend(void *arg)
+ndasuspend(void *arg, int stype)
 {
 
 	ndaflush();
