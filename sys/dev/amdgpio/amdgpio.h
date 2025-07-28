@@ -50,7 +50,8 @@
 					AMD_GPIO_PINS_BANK1 + \
 					AMD_GPIO_PINS_BANK2 + \
 					AMD_GPIO_PINS_BANK3)
-#define	AMDGPIO_DEFAULT_CAPS		(GPIO_PIN_INPUT | GPIO_PIN_OUTPUT)
+#define	AMDGPIO_DEFAULT_CAPS		(GPIO_PIN_INPUT | GPIO_PIN_OUTPUT | \
+    GPIO_PIN_PULLDOWN | GPIO_PIN_PULLUP)
 
 /* Register related macros */
 #define	AMDGPIO_PIN_REGISTER(pin)	(pin * 4)
@@ -316,12 +317,13 @@ struct amdgpio_softc {
 	int			sc_npins;
 	int			sc_ngroups;
 	struct mtx		sc_mtx;
-	struct resource		*sc_res[AMD_GPIO_NUM_PIN_BANK + 1];
+	struct resource		*sc_res[2];
 	bus_space_tag_t		sc_bst;
 	bus_space_handle_t	sc_bsh;
 	struct gpio_pin		sc_gpio_pins[AMD_GPIO_PINS_MAX];
 	const struct pin_info	*sc_pin_info;
 	const struct amd_pingroup *sc_groups;
+	void			*sc_intr_handle;
 };
 
 struct amdgpio_sysctl {
