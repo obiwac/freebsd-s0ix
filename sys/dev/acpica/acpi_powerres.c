@@ -295,79 +295,71 @@ acpi_pwr_deregister_resource(ACPI_HANDLE res)
  * If this function fails, acpi_pwr_deregister_consumer() must be called on the
  * power consumer to free already allocated memory.
  */
-static int
+static ACPI_STATUS
 acpi_pwr_get_power_resources(ACPI_HANDLE consumer, struct acpi_powerconsumer *pc)
 {
-	ACPI_INTEGER status;
-	ACPI_STRING reslist_name;
-	ACPI_HANDLE reslist_handle;
-	ACPI_STRING reslist_names[] = {"_PR0", "_PR1", "_PR2", "_PR3"};
-	ACPI_BUFFER reslist;
-	ACPI_OBJECT *reslist_object;
-	ACPI_OBJECT *dep;
-	ACPI_HANDLE *res;
-	struct acpi_prx *prx;
+    ACPI_INTEGER	status;
+    ACPI_STRING		reslist_name;
+    ACPI_HANDLE		reslist_handle;
+    ACPI_STRING		reslist_names[] = {"_PR0", "_PR1", "_PR2", "_PR3"};
+    ACPI_BUFFER		reslist;
+    ACPI_OBJECT		*reslist_object;
+    ACPI_OBJECT		*dep;
+    ACPI_HANDLE		*res;
 
-	ACPI_FUNCTION_TRACE((char *)(uintptr_t)__func__);
-	ACPI_SERIAL_ASSERT(powerres);
+    ACPI_FUNCTION_TRACE((char *)(uintptr_t)__func__);
+    ACPI_SERIAL_ASSERT(powerres);
 
-	MPASS(consumer != NULL);
+    MPASS(consumer != NULL);
 
-	for (int state = ACPI_STATE_D0; state <= ACPI_STATE_D3_HOT; state++) {
-		prx = &pc->ac_prx[state];
+    for (int state = ACPI_STATE_D0; state <= ACPI_STATE_D3_HOT; state++) {
+	pc->ac_prx[state].prx_has = false;
+	pc->ac_prx[state].prx_count = 0;
+	pc->ac_prx[state].prx_deps = NULL;
 
-		prx->prx_has = false;
-		prx->prx_count = 0;
-		prx->prx_deps = NULL;
+	reslist_name = reslist_names[state - ACPI_STATE_D0];
+	if (ACPI_FAILURE(AcpiGetHandle(consumer, reslist_name, &reslist_handle)))
+	    continue;
 
-		reslist_name = reslist_names[state - ACPI_STATE_D0];
-		if (ACPI_FAILURE(AcpiGetHandle(consumer, reslist_name,
-		    &reslist_handle)))
-			continue;
+	reslist.Pointer = NULL;
+	reslist.Length = ACPI_ALLOCATE_BUFFER;
+	status = AcpiEvaluateObjectTyped(reslist_handle, NULL, NULL, &reslist,
+					 ACPI_TYPE_PACKAGE);
+	if (ACPI_FAILURE(status) || reslist.Pointer == NULL)
+	    /*
+	     * ACPI_ALLOCATE_BUFFER entails everything will be freed on error
+	     * by AcpiEvaluateObjectTyped.
+	     */
+	    continue;
 
-		reslist.Pointer = NULL;
-		reslist.Length = ACPI_ALLOCATE_BUFFER;
-		status = AcpiEvaluateObjectTyped(reslist_handle, NULL, NULL,
-		    &reslist, ACPI_TYPE_PACKAGE);
-		if (ACPI_FAILURE(status) || reslist.Pointer == NULL)
-			/*
-			 * ACPI_ALLOCATE_BUFFER entails everything will be freed
-			 * on error by AcpiEvaluateObjectTyped.
-			 */
-			continue;
+	reslist_object = (ACPI_OBJECT *)reslist.Pointer;
+	pc->ac_prx[state].prx_has = true;
+	pc->ac_prx[state].prx_count = reslist_object->Package.Count;
 
-		reslist_object = (ACPI_OBJECT *)reslist.Pointer;
-		prx->prx_has = true;
-		prx->prx_count = reslist_object->Package.Count;
-
-		if (reslist_object->Package.Count == 0) {
-			AcpiOsFree(reslist_object);
-			continue;
-		}
-
-		prx->prx_deps = mallocarray(prx->prx_count,
-		    sizeof(*prx->prx_deps), M_ACPIPWR, M_NOWAIT);
-		if (prx->prx_deps == NULL) {
-			AcpiOsFree(reslist_object);
-			return (ENOMEM);
-		}
-
-		for (size_t i = 0; i < reslist_object->Package.Count; i++) {
-			dep = &reslist_object->Package.Elements[i];
-			res = dep->Reference.Handle;
-			prx->prx_deps[i] = res;
-
-#ifdef notyet
-			/*
-			 * It's fine if we attempt to register the same resource
-			 * again later on.
-			 */
-			acpi_pwr_register_resource(res);
-#endif
-		}
-		AcpiOsFree(reslist_object);
+	if (reslist_object->Package.Count == 0) {
+	    AcpiOsFree(reslist_object);
+	    continue;
 	}
-	return (0);
+
+	pc->ac_prx[state].prx_deps = mallocarray(pc->ac_prx[state].prx_count,
+	    sizeof(*pc->ac_prx[state].prx_deps), M_ACPIPWR, M_NOWAIT);
+	if (pc->ac_prx[state].prx_deps == NULL) {
+	    AcpiOsFree(reslist_object);
+	    return_ACPI_STATUS (AE_NO_MEMORY);
+	}
+
+	for (size_t i = 0; i < reslist_object->Package.Count; i++) {
+	    dep = &reslist_object->Package.Elements[i];
+	    res = dep->Reference.Handle;
+	    pc->ac_prx[state].prx_deps[i] = res;
+
+	    /* It's fine to attempt to register the same resource twice. */
+	    acpi_pwr_register_resource(res);
+	}
+	AcpiOsFree(reslist_object);
+    }
+
+    return_ACPI_STATUS (AE_OK);
 }
 
 /*
