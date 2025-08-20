@@ -101,13 +101,15 @@ _nl_modify_ifp_generic(struct ifnet *ifp, struct nl_parsed_link *lattrs,
 	}
 
 	if ((lattrs->ifi_change & IFF_PROMISC) != 0 ||
-	    lattrs->ifi_change == 0) {
-		error = ifpromisc(ifp, lattrs->ifi_flags & IFF_PROMISC);
-		if (error != 0) {
-			nlmsg_report_err_msg(npt, "unable to set promisc");
-			return (error);
-		}
-	}
+	    lattrs->ifi_change == 0)
+		/*
+		 * When asking for IFF_PROMISC, set permanent flag instead
+		 * (IFF_PPROMISC) as we have no way of doing promiscuity
+		 * reference counting through ifpromisc().  Every call to this
+		 * function either sets or unsets IFF_PROMISC, and ifi_change
+		 * is usually set to 0xFFFFFFFF.
+		 */
+		if_setppromisc(ifp, (lattrs->ifi_flags & IFF_PROMISC) != 0);
 
 	return (0);
 }
