@@ -524,7 +524,7 @@ static int
 is_idle_disabled(struct acpi_cpu_softc *sc)
 {
 
-    return (sc->cpu_disable_idle);
+    return (FALSE); // (sc->cpu_disable_idle);
 }
 #endif
 
@@ -1081,6 +1081,7 @@ static void
 acpi_cpu_idle(sbintime_t sbt)
 {
     struct	acpi_cpu_softc *sc;
+    struct	acpi_softc *acpi_sc;
     struct	acpi_cx *cx_next;
     uint64_t	start_ticks, end_ticks;
     uint32_t	start_time, end_time;
@@ -1097,11 +1098,12 @@ acpi_cpu_idle(sbintime_t sbt)
 	acpi_cpu_c1();
 	return;
     }
+    acpi_sc = acpi_device_get_parent_softc(sc->cpu_dev);
 
     /* If disabled, take the safe path. */
     if (is_idle_disabled(sc)) {
-	acpi_cpu_c1();
-	return;
+        acpi_cpu_c1();
+        return;
     }
 
     /* Find the lowest state that has small enough latency. */
@@ -1195,6 +1197,11 @@ acpi_cpu_idle(sbintime_t sbt)
 	start_time = 0;
 	start_ticks = cpu_ticks();
     }
+
+//    if (acpi_sc->acpi_s2idle_looping)
+//	printf("(S0i3) CPU %d gonna start sleeping in C%d\n",
+//	    PCPU_GET(cpuid), cx_next->type);
+
     if (cx_next->do_mwait) {
 	acpi_cpu_idle_mwait(cx_next->mwait_hint);
     } else {
@@ -1224,6 +1231,10 @@ acpi_cpu_idle(sbintime_t sbt)
     else
 	end_time = ((end_ticks - start_ticks) << 20) / cpu_tickrate();
     sc->cpu_prev_sleep = (sc->cpu_prev_sleep * 3 + end_time) / 4;
+
+    if (acpi_sc->acpi_s2idle_looping)
+	printf("(S0i3) CPU %d slept in C%d for %d us during idle\n",
+	    PCPU_GET(cpuid), cx_next->type, (int)end_time);
 }
 #endif
 
@@ -1275,12 +1286,12 @@ acpi_cpu_quirks(void)
 	if ((AcpiGbl_FADT.Flags & ACPI_FADT_WBINVD) &&
 	    (AcpiGbl_FADT.Flags & ACPI_FADT_WBINVD_FLUSH) == 0) {
 	    cpu_quirks |= CPU_QUIRK_NO_BM_CTRL;
-	    ACPI_DEBUG_PRINT((ACPI_DB_INFO,
-		"acpi_cpu: no BM control, using flush cache method\n"));
+	    		printf(
+		"acpi_cpu: no BM control, using flush cache method\n");
 	} else {
 	    cpu_quirks |= CPU_QUIRK_NO_C3;
-	    ACPI_DEBUG_PRINT((ACPI_DB_INFO,
-		"acpi_cpu: no BM control, C3 not available\n"));
+	    		printf(
+		"acpi_cpu: no BM control, C3 not available\n");
 	}
     }
 
@@ -1290,8 +1301,8 @@ acpi_cpu_quirks(void)
      */
     if (cpu_cx_generic && mp_ncpus > 1) {
 	cpu_quirks |= CPU_QUIRK_NO_BM_CTRL;
-	ACPI_DEBUG_PRINT((ACPI_DB_INFO,
-	    "acpi_cpu: SMP, using flush cache mode for C3\n"));
+		printf(
+	    "acpi_cpu: SMP, using flush cache mode for C3\n");
     }
 
     /* Look for various quirks of the PIIX4 part. */

@@ -186,6 +186,7 @@ intr_init_sources(void *arg)
 	if (mp_ncpus > 1)
 		nintrcnt += 8 * mp_ncpus;
 #endif
+	printf("nintrcnt %d\n", nintrcnt);
 	intrcnt = mallocarray(nintrcnt, sizeof(u_long), M_INTR, M_WAITOK |
 	    M_ZERO);
 	intrnames = mallocarray(nintrcnt, INTRNAME_LEN, M_INTR, M_WAITOK |
@@ -383,6 +384,15 @@ intr_suspend(void)
 			pic->pic_suspend(pic);
 	}
 	mtx_unlock(&intrpic_lock);
+}
+
+void
+intr_enable_src(u_int irq)
+{
+	struct intsrc *is;
+
+	is = interrupt_sources[irq];
+	is->is_pic->pic_enable_source(is);
 }
 
 static int

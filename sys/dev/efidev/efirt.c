@@ -391,6 +391,8 @@ get_table_length(enum efi_table_type type, size_t *table_len, void **taddr)
 			return (error);
 		}
 
+		printf("ESRT: %p, fw_resource_version=%lu\n", esrt, ((struct efi_esrt_table *)buf)->fw_resource_version);
+
 		/* Check ESRT version */
 		if (((struct efi_esrt_table *)buf)->fw_resource_version !=
 		    ESRT_FIRMWARE_RESOURCE_VERSION) {

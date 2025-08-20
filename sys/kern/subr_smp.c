@@ -540,6 +540,8 @@ smp_rendezvous_action(void)
 	    ("rendezvous action changed td_owepreempt"));
 }
 
+bool smp_rdv_dont_wait = false;
+
 void
 smp_rendezvous_cpus(cpuset_t map,
 	void (* setup_func)(void *), 
@@ -611,8 +613,10 @@ smp_rendezvous_cpus(cpuset_t map,
 	 * all memory actions done by the called functions on other
 	 * CPUs.
 	 */
-	while (atomic_load_acq_int(&smp_rv_waiters[3]) < ncpus)
-		cpu_spinwait();
+	if (!smp_rdv_dont_wait) {
+		while (atomic_load_acq_int(&smp_rv_waiters[3]) < ncpus)
+			cpu_spinwait();
+	}
 
 	mtx_unlock_spin(&smp_ipi_mtx);
 }
