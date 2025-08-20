@@ -85,7 +85,7 @@ SYSCTL_NODE(_hw, OID_AUTO, nhi, CTLFLAG_RD, 0, "NHI Driver Parameters");
 MALLOC_DEFINE(M_NHI, "nhi", "nhi driver memory");
 
 #ifndef NHI_DEBUG_LEVEL
-#define NHI_DEBUG_LEVEL (DBG_ROUTER | DBG_EXTRA)
+#define NHI_DEBUG_LEVEL (DBG_ROUTER | DBG_EXTRA | DBG_INTR | DBG_TXQ | DBG_FULL)
 #endif
 
 /* 0 = default, 1 = force-on, 2 = force-off */
@@ -1142,22 +1142,14 @@ nhi_intr(void *data)
 	uint32_t val, old_ci;
 	u_int count;
 
+	printf("=== %s in\n", __func__);
+
 	sc = trkr->sc;
 
 	tb_debug(sc, DBG_INTR|DBG_FULL, "Interrupt @ vector %d\n",
 	    trkr->vector);
 	if ((r = trkr->ring) == NULL)
 		return;
-
-	/*
-	 * Need to read this necessarily to clear it; see 12.6.3.4.1.  Disable
-	 * ISR Auto-Clear must be set to 0.
-	 *
-	 * XXX This might not be necessary on all platforms.  It is on Pink
-	 * Sardine, but this was not being done previously so it might have
-	 * been working without this on whatever Scott was testing on.
-	 */
-	nhi_read_reg(sc, NHI_ISR0);
 
 	/*
 	 * Process TX completions from the adapter.  Only go through
@@ -1195,6 +1187,7 @@ nhi_intr(void *data)
 	while (count-- > 0) {
 		tb_debug(sc, DBG_INTR|DBG_RXQ|DBG_FULL,
 		    "Checking RX descriptor at %d\n", r->rx_pi);
+		printf("old RX PICI=0x%08x\n", nhi_read_reg(sc, r->rx_pici_reg));
 
 		/* Look up RX descriptor and cmd */
 		rxd = &r->rx_ring[r->rx_pi];
@@ -1236,6 +1229,8 @@ nhi_intr(void *data)
 	 * Is that OK?  We keep our own copy of the PI and never read it from
 	 * hardware.  However, will overwriting it result in a missed
 	 * interrupt?
+	 *
+	 * Aymeric: I think not, spec says this is RO anyway.
 	 */
 	if (r->rx_ci != old_ci) {
 		val = r->rx_pi << RX_RING_PI_SHIFT | r->rx_ci;
@@ -1243,6 +1238,18 @@ nhi_intr(void *data)
 		    "Writing new RX PICI= 0x%08x\n", val);
 		nhi_write_reg(sc, r->rx_pici_reg, val);
 	}
+
+	/*
+	 * Need to read this necessarily to clear it; see 12.6.3.4.1.  Disable
+	 * ISR Auto-Clear must be set to 0.
+	 *
+	 * XXX This might not be necessary on all platforms.  It is on Pink
+	 * Sardine, but this was not being done previously so it might have
+	 * been working without this on whatever Scott was testing on.
+	 */
+	nhi_read_reg(sc, NHI_ISR0);
+
+	printf("=== %s out\n", __func__);
 }
 
 static int
