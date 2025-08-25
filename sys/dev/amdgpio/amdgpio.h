@@ -327,6 +327,9 @@ struct amdgpio_softc {
 	const struct pin_info	*sc_pin_info;
 	const struct amd_pingroup *sc_groups;
 	void			*sc_intr_handle;
+
+	/* XXX iichid softc. */
+	void			*sc_iichid_sc;
 };
 
 struct amdgpio_sysctl {

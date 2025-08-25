@@ -62,6 +62,8 @@
 
 #include "hid_if.h"
 
+#define IICHID_DEBUG
+
 #ifdef IICHID_DEBUG
 static int iichid_debug = 0;
 
@@ -1154,6 +1156,8 @@ iichid_attach(device_t dev)
 		    sc->irq_res, sc->irq_rid);
 		error = iichid_setup_interrupt(sc);
 	}
+
+	printf("=== %p\n", iichid_intr);
 
 	if (sc->irq_res == NULL || error != 0) {
 #ifdef IICHID_SAMPLING

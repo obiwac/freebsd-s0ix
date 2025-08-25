@@ -420,14 +420,26 @@ amdgpio_intr_filter(void *arg)
 	amdgpio_eoi_locked(sc);
 	AMDGPIO_UNLOCK(sc);
 
-	rv = FILTER_HANDLED;
+	rv = FILTER_SCHEDULE_THREAD;
 	return (rv);
 }
+
+// void	iichid_intr(void *context);
+
+int x = 0;
 
 static void
 amdgpio_intr_handler(void *arg)
 {
-	/* TODO */
+	struct amdgpio_softc *sc = arg;
+
+	printf("intr %d\n", x++);
+	// return;
+
+	void (*iichid_intr)(void *) = (void *)0xffffffff84f9f9e0;
+
+	if (sc->sc_iichid_sc != NULL)
+		iichid_intr(sc->sc_iichid_sc);
 }
 
 static int
@@ -499,6 +511,30 @@ amdgpio_attach(device_t dev)
 		amdgpio_write_4(sc, reg, flags);
 	}
 	amdgpio_eoi(sc);
+
+	/*
+	 * XXX Enable interrupts on the touchpad pin.
+	 */
+	reg = AMDGPIO_PIN_REGISTER(8);
+	flags = amdgpio_read_4(sc, reg);
+	flags |= 1 << INTERRUPT_ENABLE_OFF;
+	flags |= 1 << INTERRUPT_MASK_OFF;
+	flags |= 1 << LEVEL_TRIG_OFF;
+	amdgpio_write_4(sc, reg, flags);
+
+	/*
+	 * XXX Get iichid softc.
+	 */
+	devclass_t const iichid_dc = devclass_find("iichid");
+	if (iichid_dc == NULL)
+		device_printf(dev, "Couldn't find iichid devclass");
+	else {
+		device_t const iichid_dev = devclass_get_device(iichid_dc, 2);
+		if (iichid_dev == NULL)
+			device_printf(dev, "Couldn't find iichid2 device");
+		else
+			sc->sc_iichid_sc = device_get_softc(iichid_dev);
+	}
 
 	sc->sc_busdev = gpiobus_add_bus(dev);
 	if (sc->sc_busdev == NULL) {
