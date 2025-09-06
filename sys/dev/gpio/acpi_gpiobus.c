@@ -40,6 +40,7 @@
 #include <sys/sbuf.h>
 
 #include "gpiobus_if.h"
+#include "gpio_intr_if.h"
 
 struct acpi_gpiobus_softc {
 	struct gpiobus_softc	super_sc;
@@ -49,6 +50,7 @@ struct acpi_gpiobus_softc {
 struct acpi_gpiobus_ctx {
 	struct gpiobus_softc	*sc;
 	ACPI_HANDLE		dev_handle;
+	ACPI_HANDLE		visiting_dev_handle;
 };
 
 struct acpi_gpiobus_ivar
@@ -109,20 +111,23 @@ acpi_gpiobus_convflags(ACPI_RESOURCE_GPIO *gpio_res)
 }
 
 static ACPI_STATUS
-acpi_gpiobus_enumerate_res(ACPI_RESOURCE *res, void *context)
+acpi_gpiobus_visit_crs(ACPI_RESOURCE *res, void *context)
 {
 	ACPI_RESOURCE_GPIO *gpio_res = &res->Data.Gpio;
 	struct acpi_gpiobus_ctx *ctx = context;
 	struct gpiobus_softc *super_sc = ctx->sc;
-	ACPI_HANDLE handle;
+	ACPI_HANDLE bus_handle;
+	device_t container;
+	device_t busdev;
 	uint32_t flags, i;
+	int err;
 
 	if (res->Type != ACPI_RESOURCE_TYPE_GPIO)
 		return (AE_OK);
 
 	if (ACPI_FAILURE(AcpiGetHandle(ACPI_ROOT_OBJECT,
-	    gpio_res->ResourceSource.StringPtr, &handle)) ||
-	    handle != ctx->dev_handle)
+	    gpio_res->ResourceSource.StringPtr, &bus_handle)) ||
+	    bus_handle != ctx->dev_handle)
 		return (AE_OK);
 
 	if (__predict_false(gpio_res->PinTableLength > super_sc->sc_npins)) {
@@ -132,9 +137,25 @@ acpi_gpiobus_enumerate_res(ACPI_RESOURCE *res, void *context)
 		return (AE_LIMIT);
 	}
 
+	/*
+	 * Look at the device this _CRS belongs to and see if it has a driver
+	 * attached to it.  If so, allocate interrupts for each pin and pass
+	 * them to the device.
+	 */
+	MPASS(ctx->visiting_dev_handle != NULL);
+	container = acpi_get_device(ctx->visiting_dev_handle);
+
+	/*
+	 * The bus device here is the specific GPIO controller.  We call
+	 * GPIO_GET_BUS() on it to get the actual generic gpiobus device, which
+	 * is added as a child under the GPIO controller.
+	 */
+	busdev = GPIO_GET_BUS(acpi_get_device(bus_handle));
+
 	flags = acpi_gpiobus_convflags(gpio_res);
 	for (i = 0; i < gpio_res->PinTableLength; i++) {
 		UINT16 pin = gpio_res->PinTable[i];
+		gpio_pin_t gpio_pin;
 
 		if (__predict_false(pin >= super_sc->sc_npins)) {
 			device_printf(super_sc->sc_busdev,
@@ -143,8 +164,61 @@ acpi_gpiobus_enumerate_res(ACPI_RESOURCE *res, void *context)
 			return (AE_LIMIT);
 		}
 
-		GPIO_PIN_SETFLAGS(super_sc->sc_dev, pin, flags &
-		    ~GPIO_INTR_MASK);
+		printf("==== %s: Pin=%u, Flags=0x%x\n", __func__, pin, flags);
+
+		/*
+		 * Get pin & set flags.
+		 *
+		 * TODO Release pin.
+		 */
+		err = gpio_pin_get_by_bus_pinnum(busdev, pin, &gpio_pin);
+		if (err != 0) {
+			device_printf(super_sc->sc_busdev,
+			    "cannot acquire pin %d\n", pin);
+			continue;
+		}
+		gpio_pin_setflags(gpio_pin, flags & ~GPIO_INTR_MASK);
+
+		if (device_is_attached(container) == 0) {
+			/*
+			 * No driver attached, nothing to do.
+			 *
+			 * TODO In the future we're going to want to remember
+			 * these so that we can also pass interrupts to devices
+			 * which attach after we have gone through this.
+			 */
+			gpio_pin_release(gpio_pin);
+			continue;
+		}
+
+		/*
+		 * Allocate interrupt resource for the pin on the container
+		 * device and pass it to it.
+		 */
+		int rid = 0; // TODO
+		u_int alloc_flags = RF_ACTIVE;
+#ifdef NOT_YET /* XXX Could just remove as GPIO_INTR_SHAREABLE will not be set right now. */
+		if (flags & GPIO_INTR_SHAREABLE)
+			alloc_flags |= RF_SHAREABLE;
+#endif
+		uint32_t intr_mode = flags | GPIO_INTR_MASK; /* XXX Is this right? */
+		struct resource *intr_res = gpio_alloc_intr_resource(busdev,
+		    &rid, alloc_flags, gpio_pin, intr_mode);
+		if (intr_res == NULL) {
+			device_printf(super_sc->sc_busdev,
+			    "cannot allocate interrupt for pin %d\n", pin);
+			gpio_pin_release(gpio_pin);
+			continue;
+		}
+
+		if (GPIO_INTR_GIVE(container, busdev, intr_res) != 0) {
+			device_printf(super_sc->sc_busdev,
+			    "cannot setup interrupt for pin %d\n", pin);
+			bus_release_resource(container, SYS_RES_IRQ, rid,
+			    intr_res);
+			gpio_pin_release(gpio_pin);
+			continue;
+		}
 	}
 
 	return (AE_OK);
@@ -172,9 +246,10 @@ acpi_gpiobus_enumerate_aei(ACPI_RESOURCE *res, void *context)
 }
 
 static ACPI_STATUS
-acpi_gpiobus_enumerate(ACPI_HANDLE handle, UINT32 depth, void *context,
+acpi_gpiobus_visit_device(ACPI_HANDLE handle, UINT32 depth, void *context,
     void **result)
 {
+	struct acpi_gpiobus_ctx *ctx = context;
 	UINT32 sta;
 
 	/*
@@ -188,8 +263,10 @@ acpi_gpiobus_enumerate(ACPI_HANDLE handle, UINT32 depth, void *context,
 	if (!acpi_has_hid(handle))
 		return (AE_OK);
 
+	ctx->visiting_dev_handle = handle;
+
 	/* Look for GPIO resources */
-	AcpiWalkResources(handle, "_CRS", acpi_gpiobus_enumerate_res, context);
+	AcpiWalkResources(handle, "_CRS", acpi_gpiobus_visit_crs, ctx);
 
 	return (AE_OK);
 }
@@ -365,7 +442,7 @@ acpi_gpiobus_attach(device_t dev)
 	ctx.sc = &sc->super_sc;
 
 	status = AcpiWalkNamespace(ACPI_TYPE_DEVICE, ACPI_ROOT_OBJECT,
-	    ACPI_UINT32_MAX, acpi_gpiobus_enumerate, NULL, &ctx, NULL);
+	    ACPI_UINT32_MAX, acpi_gpiobus_visit_device, NULL, &ctx, NULL);
 
 	if (ACPI_FAILURE(status))
 		device_printf(dev, "Failed to enumerate GPIO resources\n");
