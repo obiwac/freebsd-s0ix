@@ -61,6 +61,7 @@
 #include <dev/iicbus/iiconf.h>
 
 #include "hid_if.h"
+#include "gpio_intr_if.h"
 
 #ifdef IICHID_DEBUG
 static int iichid_debug = 0;
@@ -172,6 +173,7 @@ struct iichid_softc {
 	uint8_t			*intr_buf;
 	iichid_size_t		intr_bufsize;
 
+	device_t		irq_dev;
 	int			irq_rid;
 	struct resource		*irq_res;
 	void			*irq_cookie;
@@ -695,7 +697,7 @@ iichid_setup_interrupt(struct iichid_softc *sc)
 {
 	sc->irq_cookie = 0;
 
-	int error = bus_setup_intr(sc->dev, sc->irq_res,
+	int error = bus_setup_intr(sc->irq_dev, sc->irq_res,
 	    INTR_TYPE_TTY|INTR_MPSAFE, NULL, iichid_intr, sc, &sc->irq_cookie);
 	if (error != 0)
 		DPRINTF(sc, "Could not setup interrupt handler\n");
@@ -709,7 +711,7 @@ static void
 iichid_teardown_interrupt(struct iichid_softc *sc)
 {
 	if (sc->irq_cookie)
-		bus_teardown_intr(sc->dev, sc->irq_res, sc->irq_cookie);
+		bus_teardown_intr(sc->irq_dev, sc->irq_res, sc->irq_cookie);
 
 	sc->irq_cookie = 0;
 }
@@ -1159,6 +1161,7 @@ iichid_attach(device_t dev)
 	if (sc->irq_res != NULL) {
 		DPRINTF(sc, "allocated irq at %p and rid %d\n",
 		    sc->irq_res, sc->irq_rid);
+		sc->irq_dev = sc->dev;
 		error = iichid_setup_interrupt(sc);
 	}
 
@@ -1170,8 +1173,8 @@ iichid_attach(device_t dev)
 #else
 		device_printf(sc->dev, "Interrupt setup failed\n");
 		if (sc->irq_res != NULL)
-			bus_release_resource(dev, SYS_RES_IRQ, sc->irq_rid,
-			    sc->irq_res);
+			bus_release_resource(sc->irq_dev, SYS_RES_IRQ,
+			    sc->irq_rid, sc->irq_res);
 		iichid_detach(dev);
 		error = ENXIO;
 		goto done;
@@ -1263,7 +1266,7 @@ iichid_detach(device_t dev)
 		return (error);
 	iichid_teardown_interrupt(sc);
 	if (sc->irq_res != NULL)
-		bus_release_resource(dev, SYS_RES_IRQ, sc->irq_rid,
+		bus_release_resource(sc->irq_dev, SYS_RES_IRQ, sc->irq_rid,
 		    sc->irq_res);
 #ifdef IICHID_SAMPLING
 	if (sc->taskqueue != NULL)
@@ -1273,6 +1276,28 @@ iichid_detach(device_t dev)
 #endif
 	free(sc->intr_buf, M_DEVBUF);
 	mtx_destroy(&sc->mtx);
+	return (0);
+}
+
+static int
+iichid_gpio_intr_give(device_t dev, device_t intr_dev,
+    struct resource *intr_res)
+{
+	struct iichid_softc *sc = device_get_softc(dev);
+	int err;
+
+	sc->irq_dev = intr_dev;
+	sc->irq_res = intr_res;
+	sc->irq_rid = rman_get_rid(intr_res);
+
+	err = iichid_setup_interrupt(sc);
+	if (err != 0) {
+		device_printf(dev, "Could not setup interrupt handler for "
+		    "given GPIO interrupt: %d\n", err);
+		sc->irq_res = NULL;
+		return (err);
+	}
+	device_printf(dev, "Using GPIO interrupt\n");
 	return (0);
 }
 
@@ -1371,6 +1396,9 @@ static device_method_t iichid_methods[] = {
 	DEVMETHOD(hid_set_idle,		iichid_set_idle),
 	DEVMETHOD(hid_set_protocol,	iichid_set_protocol),
 	DEVMETHOD(hid_ioctl,		iichid_ioctl),
+
+	/* GPIO interrupt consumer interface */
+	DEVMETHOD(gpio_intr_give,	iichid_gpio_intr_give),
 
 	DEVMETHOD_END
 };
