@@ -251,6 +251,7 @@ rman_fini(struct rman *rm)
 	}
 	mtx_unlock(&rm->rm_mtx);
 	mtx_lock(&rman_mtx);
+	printf("I WILL REMOVE THINE RMAN %s\n", rm->rm_descr);
 	TAILQ_REMOVE(&rman_head, rm, rm_link);
 	mtx_unlock(&rman_mtx);
 	mtx_destroy(&rm->rm_mtx);
