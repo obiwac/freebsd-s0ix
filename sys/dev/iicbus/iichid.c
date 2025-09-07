@@ -695,9 +695,11 @@ iichid_set_power_state(struct iichid_softc *sc,
 static int
 iichid_setup_interrupt(struct iichid_softc *sc)
 {
+	int error;
+
 	sc->irq_cookie = 0;
 
-	int error = bus_setup_intr(sc->irq_dev, sc->irq_res,
+	error = BUS_SETUP_INTR(sc->irq_dev, sc->dev, sc->irq_res,
 	    INTR_TYPE_TTY|INTR_MPSAFE, NULL, iichid_intr, sc, &sc->irq_cookie);
 	if (error != 0)
 		DPRINTF(sc, "Could not setup interrupt handler\n");
@@ -711,7 +713,7 @@ static void
 iichid_teardown_interrupt(struct iichid_softc *sc)
 {
 	if (sc->irq_cookie)
-		bus_teardown_intr(sc->irq_dev, sc->irq_res, sc->irq_cookie);
+		BUS_TEARDOWN_INTR(sc->irq_dev, sc->dev, sc->irq_res, sc->irq_cookie);
 
 	sc->irq_cookie = 0;
 }
@@ -1161,7 +1163,7 @@ iichid_attach(device_t dev)
 	if (sc->irq_res != NULL) {
 		DPRINTF(sc, "allocated irq at %p and rid %d\n",
 		    sc->irq_res, sc->irq_rid);
-		sc->irq_dev = sc->dev;
+		sc->irq_dev = device_get_parent(sc->dev);
 		error = iichid_setup_interrupt(sc);
 	}
 
@@ -1173,7 +1175,7 @@ iichid_attach(device_t dev)
 #else
 		device_printf(sc->dev, "Interrupt setup failed\n");
 		if (sc->irq_res != NULL)
-			bus_release_resource(sc->irq_dev, SYS_RES_IRQ,
+			BUS_RELEASE_RESOURCE(sc->irq_dev, sc->dev, SYS_RES_IRQ,
 			    sc->irq_rid, sc->irq_res);
 		iichid_detach(dev);
 		error = ENXIO;
@@ -1298,6 +1300,7 @@ iichid_gpio_intr_give(device_t dev, device_t intr_dev,
 		return (err);
 	}
 	device_printf(dev, "Using GPIO interrupt\n");
+	sc->sampling_rate_slow = 0;
 	return (0);
 }
 
@@ -1414,5 +1417,6 @@ MODULE_DEPEND(iichid, iicbus, IICBUS_MINVER, IICBUS_PREFVER, IICBUS_MAXVER);
 MODULE_DEPEND(iichid, acpi, 1, 1, 1);
 MODULE_DEPEND(iichid, hid, 1, 1, 1);
 MODULE_DEPEND(iichid, hidbus, 1, 1, 1);
+MODULE_DEPEND(iichid, gpiobus, 1, 1, 1);
 MODULE_VERSION(iichid, 1);
 IICBUS_ACPI_PNP_INFO(iichid_ids);

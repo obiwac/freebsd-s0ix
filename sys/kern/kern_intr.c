@@ -284,8 +284,8 @@ intr_event_create(struct intr_event **event, void *source, int flags, u_int irq,
 	struct intr_event *ie;
 	va_list ap;
 
-	/* The only valid flag during creation is IE_SOFT. */
-	if ((flags & ~IE_SOFT) != 0)
+	/* Check for internal flags. */
+	if ((flags & ~(IE_SOFT | IE_BUS_PRIV)) != 0)
 		return (EINVAL);
 	ie = malloc(sizeof(struct intr_event), M_ITHREAD, M_WAITOK | M_ZERO);
 	ie->ie_source = source;
@@ -436,6 +436,7 @@ intr_lookup(int irq)
 	TAILQ_FOREACH(ie, &event_list, ie_list)
 		if (ie->ie_irq == irq &&
 		    (ie->ie_flags & IE_SOFT) == 0 &&
+		    (ie->ie_flags & IE_BUS_PRIV) == 0 &&
 		    CK_SLIST_FIRST(&ie->ie_handlers) != NULL)
 			break;
 	mtx_unlock(&event_lock);

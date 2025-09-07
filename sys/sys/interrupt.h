@@ -131,6 +131,10 @@ struct intr_event {
 #define	IE_SOFT		0x000001	/* Software interrupt. */
 #define	IE_SLEEPABLE	0x000002	/* Sleepable ithread */
 #define	IE_ADDING_THREAD 0x000004	/* Currently building an ithread. */
+#define	IE_BUS_PRIV	0x000008	/* Interrupt is handled at bus level,
+					   invisible to nexus and MD interrupt
+					   code. */
+
 
 /* Flags to pass to swi_sched. */
 #define	SWI_FROMNMI	0x1

@@ -147,9 +147,7 @@ amdgpio_pin_getname(device_t dev, uint32_t pin, char *name)
 	if (!amdgpio_valid_pin(sc, pin))
 		return (EINVAL);
 
-	/* Set a very simple name */
-	snprintf(name, GPIOMAXNAME, "%s", sc->sc_gpio_pins[pin].gp_name);
-	name[GPIOMAXNAME - 1] = '\0';
+	strlcpy(name, sc->sc_gpio_pins[pin].gp_name, GPIOMAXNAME);
 
 	dprintf("pin %d name %s\n", pin, name);
 
@@ -354,6 +352,171 @@ amdgpio_pin_toggle(device_t dev, uint32_t pin)
 	return (0);
 }
 
+static bool
+amdgpio_valid_intr_pin(struct amdgpio_softc *sc, int pin)
+{
+	if (!amdgpio_valid_pin(sc, pin))
+		return (false);
+	if ((sc->sc_gpio_pins[pin].gp_caps & GPIO_INTR_MASK) == GPIO_INTR_NONE)
+		return (false);
+	return (true);
+}
+
+static void
+amdgpio_pin_config_intr(device_t dev, uint32_t pin, uint32_t intr_mode)
+{
+	struct amdgpio_softc *sc;
+	uint32_t reg, val;
+	int trig, act;
+
+	sc = device_get_softc(dev);
+
+	dprintf("pin %d mode 0x%x\n", pin, mode);
+	KASSERT(amdgpio_valid_intr_pin(sc, pin), ("invalid pin"));
+
+	/* XXX Linux also sets various debounce modes. */
+	switch (intr_mode) {
+	case GPIO_INTR_EDGE_FALLING:
+		trig = EDGE_TRIGGER;
+		act = ACTIVE_LOW;
+		break;
+	case GPIO_INTR_EDGE_RISING:
+		trig = EDGE_TRIGGER;
+		act = ACTIVE_HIGH;
+		break;
+	case GPIO_INTR_EDGE_BOTH:
+		trig = EDGE_TRIGGER;
+		act = BOTH_EDGE;
+		break;
+	case GPIO_INTR_LEVEL_LOW:
+		trig = LEVEL_TRIGGER;
+		act = ACTIVE_LOW;
+		break;
+	case GPIO_INTR_LEVEL_HIGH:
+		trig = LEVEL_TRIGGER;
+		act = ACTIVE_HIGH;
+		break;
+	default:
+		KASSERT(0, ("invalid intr mode 0x%x", intr_mode));
+		return;
+	}
+
+	reg = AMDGPIO_PIN_REGISTER(pin);
+
+	/* Set the GPIO mode and state */
+	AMDGPIO_LOCK(sc);
+	val = amdgpio_read_4(sc, reg);
+	val &= ~(1 << LEVEL_TRIG_OFF);
+	val |= trig << LEVEL_TRIG_OFF;
+	val &= ~(3 << ACTIVE_LEVEL_OFF);
+	val |= act << ACTIVE_LEVEL_OFF;
+	amdgpio_write_4(sc, reg, val);
+	AMDGPIO_UNLOCK(sc);
+}
+
+static void
+amdgpio_pin_enable_intr(device_t dev, uint32_t pin)
+{
+	struct amdgpio_softc *sc;
+	uint32_t reg, val;
+
+	sc = device_get_softc(dev);
+
+	dprintf("pin %d enable intr\n", pin);
+	KASSERT(amdgpio_valid_intr_pin(sc, pin), ("invalid pin"));
+
+	reg = AMDGPIO_PIN_REGISTER(pin);
+
+	AMDGPIO_LOCK(sc);
+	val = amdgpio_read_4(sc, reg);
+	val |= BIT(INTERRUPT_STS_OFF);	/* clear previous status as well */
+	val |= BIT(INTERRUPT_ENABLE_OFF);
+	amdgpio_write_4(sc, reg, val);
+	AMDGPIO_UNLOCK(sc);
+}
+
+static void
+amdgpio_pin_disable_intr(device_t dev, uint32_t pin)
+{
+	struct amdgpio_softc *sc;
+	uint32_t reg, val;
+
+	sc = device_get_softc(dev);
+
+	dprintf("pin %d disable intr\n", pin);
+	KASSERT(amdgpio_valid_intr_pin(sc, pin), ("invalid pin"));
+
+	reg = AMDGPIO_PIN_REGISTER(pin);
+
+	AMDGPIO_LOCK(sc);
+	val = amdgpio_read_4(sc, reg);
+	val &= ~BIT(INTERRUPT_ENABLE_OFF);
+	amdgpio_write_4(sc, reg, val);
+	AMDGPIO_UNLOCK(sc);
+}
+
+static void
+amdgpio_pin_unmask_intr(device_t dev, uint32_t pin)
+{
+	struct amdgpio_softc *sc;
+	uint32_t reg, val;
+
+	sc = device_get_softc(dev);
+
+	dprintf("pin %d unmask intr\n", pin);
+	KASSERT(amdgpio_valid_intr_pin(sc, pin), ("invalid pin"));
+
+	reg = AMDGPIO_PIN_REGISTER(pin);
+
+	AMDGPIO_LOCK(sc);
+	val = amdgpio_read_4(sc, reg);
+	val |= BIT(INTERRUPT_MASK_OFF);
+	amdgpio_write_4(sc, reg, val);
+	AMDGPIO_UNLOCK(sc);
+}
+
+static void
+amdgpio_pin_mask_intr(device_t dev, uint32_t pin)
+{
+	struct amdgpio_softc *sc;
+	uint32_t reg, val;
+
+	sc = device_get_softc(dev);
+
+	dprintf("pin %d mask intr\n", pin);
+	KASSERT(amdgpio_valid_intr_pin(sc, pin), ("invalid pin"));
+
+	reg = AMDGPIO_PIN_REGISTER(pin);
+
+	AMDGPIO_LOCK(sc);
+	val = amdgpio_read_4(sc, reg);
+	val &= ~BIT(INTERRUPT_MASK_OFF);
+	val |= BIT(INTERRUPT_STS_OFF);	/* clear status as well */
+	amdgpio_write_4(sc, reg, val);
+	AMDGPIO_UNLOCK(sc);
+}
+
+static void
+amdgpio_pin_eoi(device_t dev, uint32_t pin)
+{
+	struct amdgpio_softc *sc;
+	uint32_t reg, val;
+
+	sc = device_get_softc(dev);
+
+	dprintf("pin %d eoi intr\n", pin);
+	KASSERT(amdgpio_valid_intr_pin(sc, pin), ("invalid pin"));
+
+	reg = AMDGPIO_PIN_REGISTER(pin);
+
+	AMDGPIO_LOCK(sc);
+	/* XXX Linux does EOI via WAKE_INT_MASTER_REG and EIO_MASK. */
+	val = amdgpio_read_4(sc, reg);
+	val |= BIT(INTERRUPT_STS_OFF);
+	amdgpio_write_4(sc, reg, val);
+	AMDGPIO_UNLOCK(sc);
+}
+
 static int
 amdgpio_probe(device_t dev)
 {
@@ -392,49 +555,57 @@ amdgpio_intr_filter(void *arg)
 {
 	struct amdgpio_softc *sc = arg;
 	int off, rv = FILTER_STRAY;
-	uint32_t reg;
+	uint32_t reg, pin;
+	uint64_t status;
+
+	/*
+	 * We set up interrupts before attaching the gpiobus, so we might get
+	 * interrupts before sc_busdev is set.
+	 */
+	if (sc->sc_busdev == NULL)
+		return (rv);
 
 	/* We can lock in the filter routine as it is MTX_SPIN. */
 	AMDGPIO_LOCK(sc);
 
 	/*
-	 * TODO Instead of just reading the registers of all pins, we should
-	 * read WAKE_INT_STATUS_REG0/1.  A bit set in here denotes a group of
-	 * 4 pins where at least one has an interrupt for us.  Then we can just
-	 * iterate over those 4 pins.
+	 * Merge into a single 46-bit status.
 	 *
 	 * See GPIO_Interrupt_Status_Index_0 in BKDG.
 	 */
-	for (size_t pin = 0; pin < AMD_GPIO_PINS_EXPOSED; pin++) {
-		off = AMDGPIO_PIN_REGISTER(pin);
-		reg = amdgpio_read_4(sc, off);
-		if ((reg & UNSERVICED_INTERRUPT_MASK) == 0)
+	status = ((uint64_t)amdgpio_read_4(sc, WAKE_INT_STATUS_REG1)) << 32;
+	status |= amdgpio_read_4(sc, WAKE_INT_STATUS_REG0);
+	status &= AMD_GPIO_INTR_MASK;
+	for (size_t i = 0; i < AMD_GPIO_NUM_INTR_BITS; i++) {
+		if ((status & (1ULL << i)) == 0)
 			continue;
-		/*
-		 * Must write 1's to wake/interrupt status bits to clear them.
-		 * We can do this simply by writing back to the register.
-		 */
-		amdgpio_write_4(sc, off, reg);
+		for (int j = 0; j < AMD_GPIO_PINS_PER_INTR_BIT; j++) {
+			pin = i * AMD_GPIO_PINS_PER_INTR_BIT + j;
+			off = AMDGPIO_PIN_REGISTER(pin);
+			reg = amdgpio_read_4(sc, off);
+			if ((reg & UNSERVICED_INTERRUPT_MASK) == 0)
+				continue;
+			gpiobus_handle_intr(sc->sc_busdev, pin);
+			rv = FILTER_HANDLED;
+
+			/*
+			 * Must write 1's to wake/interrupt status bits to clear them.
+			 * We can do this simply by writing back to the register.
+			 */
+			amdgpio_write_4(sc, off, reg);
+		}
 	}
 
 	amdgpio_eoi_locked(sc);
 	AMDGPIO_UNLOCK(sc);
-
-	rv = FILTER_HANDLED;
 	return (rv);
-}
-
-static void
-amdgpio_intr_handler(void *arg)
-{
-	/* TODO */
 }
 
 static int
 amdgpio_attach(device_t dev)
 {
 	struct amdgpio_softc *sc;
-	int i, pin, bank, reg;
+	int i, pin, bank, reg, intrbit;
 	uint32_t flags;
 
 	sc = device_get_softc(dev);
@@ -460,7 +631,7 @@ amdgpio_attach(device_t dev)
 
 	/* Set up interrupt handler. */
 	if (bus_setup_intr(dev, sc->sc_res[1], INTR_TYPE_MISC | INTR_MPSAFE,
-	    amdgpio_intr_filter, amdgpio_intr_handler, sc, &sc->sc_intr_handle)
+	    amdgpio_intr_filter, NULL, sc, &sc->sc_intr_handle)
 	    != 0) {
 		device_printf(dev, "couldn't set up interrupt\n");
 		goto err_intr;
@@ -483,11 +654,16 @@ amdgpio_attach(device_t dev)
 	 */
 	for (i = 0; i < AMD_GPIO_PINS_EXPOSED ; i++) {
 		pin = kernzp_pins[i].pin_num;
-		bank = pin/AMD_GPIO_PINS_PER_BANK;
+		bank = pin / AMD_GPIO_PINS_PER_BANK;
+		intrbit = pin / AMD_GPIO_PINS_PER_INTR_BIT;
 		snprintf(sc->sc_gpio_pins[pin].gp_name, GPIOMAXNAME, "%s%d_%s",
 			AMD_GPIO_PREFIX, bank, kernzp_pins[i].pin_name);
 		sc->sc_gpio_pins[pin].gp_pin = pin;
 		sc->sc_gpio_pins[pin].gp_caps = AMDGPIO_DEFAULT_CAPS;
+		if (sc->sc_intr_handle != NULL &&
+		    intrbit < AMD_GPIO_NUM_INTR_BITS &&
+		    intrbit != AMD_GPIO_RESERVED_INTR_BIT)
+			sc->sc_gpio_pins[pin].gp_caps |= AMDGPIO_INTR_CAPS;
 		sc->sc_gpio_pins[pin].gp_flags =
 		    amdgpio_is_pin_output(sc, pin) ?
 		    GPIO_PIN_OUTPUT : GPIO_PIN_INPUT;
@@ -499,6 +675,14 @@ amdgpio_attach(device_t dev)
 		amdgpio_write_4(sc, reg, flags);
 	}
 	amdgpio_eoi(sc);
+
+	pin = 8;
+	reg = AMDGPIO_PIN_REGISTER(pin);
+	flags = amdgpio_read_4(sc, reg);
+	flags |= (1 << INTERRUPT_ENABLE_OFF);
+	flags |= (1 << INTERRUPT_MASK_OFF);
+	amdgpio_write_4(sc, reg, flags);
+	amdgpio_pin_config_intr(dev, 8, GPIO_INTR_LEVEL_LOW);
 
 	sc->sc_busdev = gpiobus_add_bus(dev);
 	if (sc->sc_busdev == NULL) {
@@ -529,6 +713,7 @@ amdgpio_detach(device_t dev)
 		gpiobus_detach_bus(dev);
 	if (sc->sc_intr_handle)
 		bus_teardown_intr(dev, sc->sc_res[1], sc->sc_intr_handle);
+	// TODO bus_release_resource(sc->sc_intr_rid, sc->sc_intr_res)?
 	bus_release_resources(dev, amdgpio_spec, sc->sc_res);
 
 	AMDGPIO_LOCK_DESTROY(sc);
@@ -577,10 +762,24 @@ amdgpio_suspend(device_t dev)
 static int
 amdgpio_resume(device_t dev)
 {
+	struct amdgpio_softc *sc = device_get_softc(dev);
+	uint32_t reg, flags;
+
 	/*
 	 * XXX Will have to resume properly once we're actually able to use
 	 * amdgpio for interrupts.
 	 */
+
+	AMDGPIO_LOCK(sc);
+
+	reg = AMDGPIO_PIN_REGISTER(8);
+	flags = amdgpio_read_4(sc, reg);
+	flags |= (1 << INTERRUPT_ENABLE_OFF);
+	flags |= (1 << INTERRUPT_MASK_OFF);
+	amdgpio_write_4(sc, reg, flags);
+
+	AMDGPIO_UNLOCK(sc);
+
 	return (0);
 }
 
