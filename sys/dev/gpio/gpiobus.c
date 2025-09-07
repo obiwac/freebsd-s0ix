@@ -32,6 +32,13 @@
 #include <sys/gpio.h>
 #ifdef INTRNG
 #include <sys/intr.h>
+#else
+#include <sys/interrupt.h>
+#include <sys/proc.h>
+#include <sys/sbuf.h>
+#include <sys/sx.h>
+#include <sys/sysctl.h>
+#include <sys/syslog.h>
 #endif
 #include <sys/kernel.h>
 #include <sys/malloc.h>
@@ -59,6 +66,11 @@ static void gpiobus_probe_nomatch(device_t, device_t);
 static int gpiobus_print_child(device_t, device_t);
 static device_t gpiobus_add_child(device_t, u_int, const char *, int);
 static void gpiobus_hinted_child(device_t, const char *, int);
+#ifndef INTRNG
+static void gpiobus_pic_init(struct gpiobus_softc *);
+static void gpiobus_pic_destroy(struct gpiopic *);
+static void gpiobus_pic_resume(struct gpiopic *);
+#endif
 
 /*
  * GPIOBUS interface
@@ -113,14 +125,6 @@ gpio_alloc_intr_resource(device_t consumer_dev, int rid, u_int alloc_flags,
 		return (NULL);
 	}
 	return (res);
-}
-#else
-struct resource *
-gpio_alloc_intr_resource(device_t consumer_dev, int rid, u_int alloc_flags,
-    gpio_pin_t pin, uint32_t intr_mode)
-{
-
-	return (NULL);
 }
 #endif
 
@@ -342,19 +346,28 @@ gpiobus_init_softc(device_t dev)
 	sc = GPIOBUS_SOFTC(dev);
 	sc->sc_busdev = dev;
 	sc->sc_dev = device_get_parent(dev);
-	sc->sc_intr_rman.rm_type = RMAN_ARRAY;
-	sc->sc_intr_rman.rm_descr = "GPIO Interrupts";
-	if (rman_init(&sc->sc_intr_rman) != 0 ||
-	    rman_manage_region(&sc->sc_intr_rman, 0, ~0) != 0)
-		panic("%s: failed to set up rman.", __func__);
 
 	if (GPIO_PIN_MAX(sc->sc_dev, &sc->sc_npins) != 0)
 		return (ENXIO);
-
 	KASSERT(sc->sc_npins >= 0, ("GPIO device with no pins"));
 
 	/* Pins = GPIO_PIN_MAX() + 1 */
 	sc->sc_npins++;
+
+	sc->sc_intr_rman.rm_type = RMAN_ARRAY;
+	sc->sc_intr_rman.rm_descr = "GPIO Interrupts";
+#ifndef INTRNG
+	sc->sc_intr_rman.rm_start = 0;
+	sc->sc_intr_rman.rm_end = sc->sc_npins - 1;
+#endif
+	if (rman_init(&sc->sc_intr_rman) != 0)
+		panic("%s: failed to set up rman.", __func__);
+#ifdef INTRNG
+	if (rman_manage_region(&sc->sc_intr_rman, 0, ~0) != 0)
+#else
+	if (rman_manage_region(&sc->sc_intr_rman, 0, sc->sc_npins - 1) != 0)
+#endif
+		panic("%s: failed to set up rman.", __func__);
 
 	sc->sc_pins = malloc(sizeof(*sc->sc_pins) * sc->sc_npins, M_DEVBUF,
 	    M_NOWAIT | M_ZERO);
@@ -364,6 +377,9 @@ gpiobus_init_softc(device_t dev)
 	/* Initialize the bus lock. */
 	GPIOBUS_LOCK_INIT(sc);
 
+#ifndef INTRNG
+	gpiobus_pic_init(sc);
+#endif
 	return (0);
 }
 
@@ -484,6 +500,10 @@ gpiobus_acquire_child_pins(device_t dev, device_t child)
 		/* Use the child name as pin name. */
 		GPIOBUS_PIN_SETNAME(dev, devi->pins[i],
 		    device_get_nameunit(child));
+
+		/* Set pin as a potential interrupt resource for the child. */
+		resource_list_add(&devi->rl, SYS_RES_IRQ, i, devi->pins[i],
+		    devi->pins[i], 1);
 
 	}
 	return (0);
@@ -611,16 +631,18 @@ int
 gpiobus_detach(device_t dev)
 {
 	struct gpiobus_softc *sc;
+	struct gpiopic *pic;
 	int i, err;
 
 	sc = GPIOBUS_SOFTC(dev);
+	pic = sc->sc_pic;
 	KASSERT(mtx_initialized(&sc->sc_mtx),
 	    ("gpiobus mutex not initialized"));
-	GPIOBUS_LOCK_DESTROY(sc);
 
 	if ((err = bus_generic_detach(dev)) != 0)
 		return (err);
 
+	// MPASS(rman_fini(&sc->sc_intr_rman) != EBUSY); // TODO Is this kind of assert okay?
 	rman_fini(&sc->sc_intr_rman);
 	if (sc->sc_pins) {
 		for (i = 0; i < sc->sc_npins; i++) {
@@ -632,6 +654,10 @@ gpiobus_detach(device_t dev)
 		sc->sc_pins = NULL;
 	}
 
+#ifndef INTRNG
+	gpiobus_pic_destroy(pic);
+#endif
+	GPIOBUS_LOCK_DESTROY(sc);
 	return (0);
 }
 
@@ -645,7 +671,10 @@ gpiobus_suspend(device_t dev)
 static int
 gpiobus_resume(device_t dev)
 {
+	struct gpiobus_softc *sc;
 
+	sc = GPIOBUS_SOFTC(dev);
+	gpiobus_pic_resume(sc->sc_pic);
 	return (bus_generic_resume(dev));
 }
 
@@ -863,15 +892,28 @@ gpiobus_get_rman(device_t bus, int type, u_int flags)
 	}
 }
 
+/*
+ * For now, this method supports only requests for GPIO IRQ resources.
+ * The requesting device, a consumer, does not have to be a child or
+ * a descendant of the bus device.
+ *
+ * FIXME
+ * The method does not support non-IRQ resources or non-GPIO IRQ resources
+ * even for its children.  This should be fixed as soon as there is
+ * a child driver needs access to system resources.
+ */
 static struct resource *
 gpiobus_alloc_resource(device_t bus, device_t child, int type, int rid,
     rman_res_t start, rman_res_t end, rman_res_t count, u_int flags)
 {
+	struct rman *rm;
+	struct resource *r;
 	struct resource_list *rl;
 	struct resource_list_entry *rle;
 	int isdefault;
 
-	isdefault = (RMAN_IS_DEFAULT_RANGE(start, end) && count == 1);
+	isdefault = RMAN_IS_DEFAULT_RANGE(start, end) && count == 1 &&
+	    device_get_parent(child) == bus;
 	if (isdefault) {
 		rl = BUS_GET_RESOURCE_LIST(bus, child);
 		if (rl == NULL)
@@ -883,27 +925,56 @@ gpiobus_alloc_resource(device_t bus, device_t child, int type, int rid,
 		count = rle->count;
 		end = rle->end;
 	}
-	return (bus_generic_rman_alloc_resource(bus, child, type, rid, start,
-	    end, count, flags));
+
+	rm = gpiobus_get_rman(bus, type, flags);
+	r = rman_reserve_resource(rm, start, end, count, flags & ~RF_ACTIVE,
+	    child);
+	if (r == NULL)
+		return (NULL);
+	rman_set_rid(r, rid);
+	rman_set_type(r, type);
+
+	if ((flags & RF_ACTIVE) != 0 && rman_activate_resource(r) != 0) {
+		rman_release_resource(r);
+		return (NULL);
+	}
+
+	return (r);
 }
 
-static int
+int
+gpiobus_release_resource(device_t dev, device_t child, struct resource *r);
+
+int
 gpiobus_release_resource(device_t dev, device_t child, struct resource *r)
 {
+	struct rman *rm;
 	int err;
+	u_int flags;
 #ifdef INTRNG
 	u_int irq;
 
 	irq = rman_get_start(r);
 	MPASS(irq == rman_get_end(r));
 #endif
-	err = bus_generic_rman_release_resource(dev, child, r);
-	if (err != 0)
-		return (err);
+	/* TODO Can I just use bus_generic_rman_release_resource? */
+
+	flags = rman_get_flags(r);
+	rm = gpiobus_get_rman(dev, rman_get_type(r), flags);
+	if (!rman_is_region_manager(r, rm)) {
+		device_printf(dev, "release_resource: bad resource\n");
+		return (EINVAL);
+	}
+	if (flags & RF_ACTIVE) {
+		err = rman_deactivate_resource(r);
+		if (err != 0)
+			return (err);
+	}
+
 #ifdef INTRNG
 	intr_unmap_irq(irq);
 #endif
-	return (0);
+	return (rman_release_resource(r));
 }
 
 static struct resource_list *
@@ -917,7 +988,7 @@ gpiobus_get_resource_list(device_t bus __unused, device_t child)
 }
 
 static int
-gpiobus_acquire_bus(device_t busdev, device_t child, int how)
+gpiobus_acquire_bus(device_t busdev, device_t consumer, int how)
 {
 	struct gpiobus_softc *sc;
 
@@ -925,10 +996,10 @@ gpiobus_acquire_bus(device_t busdev, device_t child, int how)
 	GPIOBUS_ASSERT_UNLOCKED(sc);
 	GPIOBUS_LOCK(sc);
 	if (sc->sc_owner != NULL) {
-		if (sc->sc_owner == child)
+		if (sc->sc_owner == consumer)
 			panic("%s: %s still owns the bus.",
 			    device_get_nameunit(busdev),
-			    device_get_nameunit(child));
+			    device_get_nameunit(consumer));
 		if (how == GPIOBUS_DONTWAIT) {
 			GPIOBUS_UNLOCK(sc);
 			return (EWOULDBLOCK);
@@ -936,14 +1007,14 @@ gpiobus_acquire_bus(device_t busdev, device_t child, int how)
 		while (sc->sc_owner != NULL)
 			mtx_sleep(sc, &sc->sc_mtx, 0, "gpiobuswait", 0);
 	}
-	sc->sc_owner = child;
+	sc->sc_owner = consumer;
 	GPIOBUS_UNLOCK(sc);
 
 	return (0);
 }
 
 static void
-gpiobus_release_bus(device_t busdev, device_t child)
+gpiobus_release_bus(device_t busdev, device_t consumer)
 {
 	struct gpiobus_softc *sc;
 
@@ -953,11 +1024,11 @@ gpiobus_release_bus(device_t busdev, device_t child)
 	if (sc->sc_owner == NULL)
 		panic("%s: %s releasing unowned bus.",
 		    device_get_nameunit(busdev),
-		    device_get_nameunit(child));
-	if (sc->sc_owner != child)
+		    device_get_nameunit(consumer));
+	if (sc->sc_owner != consumer)
 		panic("%s: %s trying to release bus owned by %s",
 		    device_get_nameunit(busdev),
-		    device_get_nameunit(child),
+		    device_get_nameunit(consumer),
 		    device_get_nameunit(sc->sc_owner));
 	sc->sc_owner = NULL;
 	wakeup(sc);
@@ -1133,6 +1204,539 @@ gpiobus_pin_setname(device_t dev, uint32_t pin, const char *name)
 	return (0);
 }
 
+#ifndef INTRNG
+
+struct gpiopic;
+
+struct gpiopic_intsrc {
+	struct gpiopic *is_pic;
+	struct intr_event *is_event;
+	u_long *is_count;	/* TODO expose to userland. */
+	u_long *is_straycount;	/* TODO expose to userland. */
+	int is_handlers;
+	u_int is_pin;
+	u_int is_mode;
+	u_int is_enabled:1;
+	u_int is_masked:1;
+};
+
+struct gpiopic {
+	struct sx intrsrc_lock;
+	struct gpiobus_softc *sc;
+	struct gpiopic_intsrc *intr_srcs;
+	u_long *intr_counts;
+};
+
+static int
+sysctl_gpio_intrs(SYSCTL_HANDLER_ARGS)
+{
+	struct sbuf sbuf;
+	struct gpiopic *pic = arg1;
+	struct gpiopic_intsrc *isrc;
+	u_int i;
+	int error;
+
+	error = sysctl_wire_old_buffer(req, 0);
+	if (error != 0)
+		return (error);
+
+	sbuf_new_for_sysctl(&sbuf, NULL, 128, req);
+	sx_slock(&pic->intrsrc_lock);
+	for (i = 0; i < pic->sc->sc_npins; i++) {
+		isrc = &pic->intr_srcs[i];
+		if (isrc->is_event == NULL)
+			continue;
+		sbuf_printf(&sbuf, "%s:%u (mode 0x%08x): %lu\n",
+		    isrc->is_event->ie_fullname,
+		    isrc->is_pin,
+		    isrc->is_mode,
+		    *isrc->is_count);
+	}
+
+	sx_sunlock(&pic->intrsrc_lock);
+	error = sbuf_finish(&sbuf);
+	sbuf_delete(&sbuf);
+	return (error);
+}
+
+static int
+gpiopic_assign_cpu(void *arg, int cpu)
+{
+	/*
+	 * This could be made to work if only a single pin is configured
+	 * to be an interrupt source but not in general case.
+	 * At this time there does not appear to be a case for binding
+	 * GPIO interrupts, so not bothering with the only case that could
+	 * be made to work.
+	 */
+	return (EOPNOTSUPP);
+}
+
+static void
+gpiopic_unmask_intr(void *arg)
+{
+	struct gpiopic_intsrc *gisrc = arg;
+
+	gisrc->is_masked = 0;
+	GPIO_PIN_UNMASK_INTR(gisrc->is_pic->sc->sc_dev, gisrc->is_pin);
+}
+
+static void
+gpiopic_mask_intr(void *arg)
+{
+	struct gpiopic_intsrc *gisrc = arg;
+
+	gisrc->is_masked = 1;
+	GPIO_PIN_MASK_INTR(gisrc->is_pic->sc->sc_dev, gisrc->is_pin);
+}
+
+static void
+gpiopic_eoi(void *arg)
+{
+	struct gpiopic_intsrc *gisrc = arg;
+
+	GPIO_PIN_EOI(gisrc->is_pic->sc->sc_dev, gisrc->is_pin);
+}
+
+static void
+gpiopic_enable_intr(struct gpiopic_intsrc *gisrc)
+{
+	gisrc->is_enabled = 1;
+	GPIO_PIN_ENABLE_INTR(gisrc->is_pic->sc->sc_dev, gisrc->is_pin);
+}
+
+static void
+gpiopic_disable_intr(struct gpiopic_intsrc *gisrc)
+{
+	gisrc->is_enabled = 0;
+	GPIO_PIN_DISABLE_INTR(gisrc->is_pic->sc->sc_dev, gisrc->is_pin);
+}
+
+static void
+gpiopic_config_intr(struct gpiopic_intsrc *gisrc, uint32_t intr_mode) {
+	gisrc->is_mode = intr_mode;
+	GPIO_PIN_CONFIG_INTR(gisrc->is_pic->sc->sc_dev, gisrc->is_pin,
+	    intr_mode);
+}
+
+static int
+gpiopic_check_intr_pin(struct gpiopic *gpiopic, uint32_t pin)
+{
+	struct gpiopic_intsrc *gisrc;
+
+	if (gpiopic == NULL)
+		return (ENOENT);
+	if (pin >= gpiopic->sc->sc_npins)
+		return (ENOENT);
+	gisrc = &gpiopic->intr_srcs[pin];
+	if (gisrc->is_event == NULL)
+		return (ENOENT);
+	return (0);
+}
+
+static int
+gpiopic_register_sources(struct gpiopic *gpiopic)
+{
+	char name[GPIOMAXNAME];
+	struct gpiobus_softc *sc = gpiopic->sc;
+	struct gpiopic_intsrc *gisrc;
+	int i, count;
+	int err;
+
+	count = 0;
+	for (i = 0; i < sc->sc_npins; i++) {
+		uint32_t pincaps;
+
+		err = GPIO_PIN_GETCAPS(sc->sc_dev, i, &pincaps);
+		if (err != 0)
+			continue;
+		if ((pincaps & GPIO_INTR_MASK) == GPIO_INTR_NONE)
+			continue;
+
+		gisrc = &gpiopic->intr_srcs[i];
+		gisrc->is_pic = gpiopic;
+		gisrc->is_pin = i;
+		gisrc->is_count = &gpiopic->intr_counts[i * 2];
+		gisrc->is_straycount = &gpiopic->intr_counts[i * 2 + 1];
+		gisrc->is_enabled = 0;
+		gisrc->is_mode = GPIO_INTR_CONFORM;
+
+		/*
+		 * We use IE_BUS_PRIV to indicate that this interrupt event is
+		 * completely private to this bus.  It's managed by the bus and
+		 * it is not visible to the global interrupt management.
+		 * As a consequence, its number / vector is in the private
+		 * space and is meaningless in the global space.
+		 */
+		(void)gpiobus_pin_getname(gpiopic->sc->sc_busdev, i, name);
+		err = intr_event_create(&gisrc->is_event, gisrc, IE_BUS_PRIV,
+		    i,
+		    gpiopic_mask_intr,		/* pre_ithread */
+		    gpiopic_unmask_intr,	/* post_ithread */
+		    gpiopic_eoi,		/* post_filter */
+		    gpiopic_assign_cpu,
+		    "%s", name);
+		if (err != 0) {
+			device_printf(sc->sc_busdev, "gpiopic failed to "
+			    "create interrupt event for pin %u: %d\n", i, err);
+			continue;
+		}
+		count++;
+	}
+	return (count);
+}
+
+static void
+gpiobus_pic_init(struct gpiobus_softc *sc)
+{
+
+	struct sysctl_ctx_list *ctx;
+	struct sysctl_oid *tree_node;
+	struct sysctl_oid_list *tree;
+	struct gpiopic *gpiopic;
+	int i, count;
+	int err;
+
+	for (i = 0; i < sc->sc_npins; i++) {
+		uint32_t pincaps;
+
+		err = GPIO_PIN_GETCAPS(sc->sc_dev, i, &pincaps);
+		if (err != 0)
+			continue;
+		if ((pincaps & GPIO_INTR_MASK) != GPIO_INTR_NONE)
+			break;
+	}
+	if (i == sc->sc_npins)
+		return;
+
+	gpiopic = malloc(sizeof(struct gpiopic), M_DEVBUF, M_NOWAIT | M_ZERO);
+	if (gpiopic == NULL) {
+		device_printf(sc->sc_busdev, "gpiopic allocation failed\n");
+		return;
+	}
+
+	gpiopic->intr_srcs = malloc(sc->sc_npins *
+	    sizeof(struct gpiopic_intsrc), M_DEVBUF, M_NOWAIT | M_ZERO);
+	if (gpiopic->intr_srcs == NULL) {
+		free(gpiopic, M_DEVBUF);
+		device_printf(sc->sc_busdev, "gpiopic allocation failed\n");
+		return;
+	}
+
+	/* Two interrupt counters per pin: total and stray. */
+	gpiopic->intr_counts = malloc(2 * sc->sc_npins *
+	    sizeof(*gpiopic->intr_counts), M_DEVBUF, M_NOWAIT | M_ZERO);
+	if (gpiopic->intr_counts == NULL) {
+		free(gpiopic->intr_srcs, M_DEVBUF);
+		free(gpiopic, M_DEVBUF);
+		device_printf(sc->sc_busdev, "gpiopic allocation failed\n");
+		return;
+	}
+
+	sx_init(&gpiopic->intrsrc_lock, "gpiopic lock");
+	gpiopic->sc = sc;
+	count = gpiopic_register_sources(gpiopic);
+	sc->sc_pic = gpiopic;
+	device_printf(sc->sc_busdev, "initialized %d interrupt sources\n",
+	    count);
+
+	ctx = device_get_sysctl_ctx(sc->sc_busdev);
+	tree_node = device_get_sysctl_tree(sc->sc_busdev);
+	tree = SYSCTL_CHILDREN(tree_node);
+	SYSCTL_ADD_PROC(ctx, tree, OID_AUTO, "interrupts",
+	    CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_MPSAFE,
+	    gpiopic, 0, sysctl_gpio_intrs, "A",
+	    "interrupt:pin (current mode): count");
+}
+
+static void
+gpiobus_pic_destroy(struct gpiopic *gpiopic)
+{
+	struct gpiopic_intsrc *gisrc;
+	int i;
+
+	if (gpiopic == NULL)
+		return;
+
+	sx_xlock(&gpiopic->intrsrc_lock);
+	for (i = 0; i < gpiopic->sc->sc_npins; i++) {
+		gisrc = &gpiopic->intr_srcs[i];
+		if (gisrc->is_event == NULL)
+			continue;
+		/* XXX what to do if there is a busy event? */
+		(void)intr_event_destroy(gisrc->is_event);
+	}
+	sx_xunlock(&gpiopic->intrsrc_lock);
+
+	sx_destroy(&gpiopic->intrsrc_lock);
+	free(gpiopic->intr_counts, M_DEVBUF);
+	free(gpiopic->intr_srcs, M_DEVBUF);
+	free(gpiopic, M_DEVBUF);
+}
+
+static void
+gpiobus_pic_resume(struct gpiopic *gpiopic)
+{
+	struct gpiopic_intsrc *gisrc;
+	int i;
+
+	if (gpiopic == NULL)
+		return;
+
+	sx_xlock(&gpiopic->intrsrc_lock);
+	for (i = 0; i < gpiopic->sc->sc_npins; i++) {
+		gisrc = &gpiopic->intr_srcs[i];
+		if (gisrc->is_event == NULL)
+			continue;
+
+		/* Just in case. */
+		gpiopic_disable_intr(gisrc);
+
+		if (!gisrc->is_enabled)
+			continue;
+
+		if (gisrc->is_mode != GPIO_INTR_CONFORM)
+			gpiopic_config_intr(gisrc, gisrc->is_mode);
+		if (gisrc->is_masked)
+			gpiopic_mask_intr(gisrc);
+		else
+			gpiopic_unmask_intr(gisrc);
+		gpiopic_enable_intr(gisrc);
+	}
+	sx_xunlock(&gpiopic->intrsrc_lock);
+}
+
+#define	GPIO_MAX_STRAY	10
+
+void
+gpiobus_handle_intr(device_t busdev, uint32_t pin)
+{
+	struct gpiobus_softc *sc;
+	struct gpiopic *gpiopic;
+	struct gpiopic_intsrc *gisrc;
+	struct intr_event *ie;
+
+	sc = device_get_softc(busdev);
+	gpiopic = sc->sc_pic;
+
+	KASSERT(pin < sc->sc_npins,
+	    ("%s for unsupported pin %u", __func__, pin));
+	gisrc = &gpiopic->intr_srcs[pin];
+	ie = gisrc->is_event;
+
+	(*gisrc->is_count)++;
+
+	/*
+	 * For stray interrupts, mask the source, bump the
+	 * stray count, and log the condition.
+	 */
+	if (intr_event_handle(ie, curthread->td_intr_frame) != 0) {
+		gpiopic_mask_intr(gisrc);
+		gpiopic_eoi(gisrc);
+		(*gisrc->is_straycount)++;
+		if (*gisrc->is_straycount < GPIO_MAX_STRAY) {
+			log(LOG_ERR, "stray irq on pin %u\n", pin);
+		} else if (*gisrc->is_straycount == GPIO_MAX_STRAY) {
+			log(LOG_CRIT, "too many stray irq's on pin %u: "
+			    "not logging anymore\n", pin);
+		}
+	}
+}
+
+static int
+gpiopic_add_handler(const char *name, struct gpiopic *gpiopic, uint32_t pin,
+    driver_filter_t filter, driver_intr_t handler,
+    void *arg, enum intr_type flags, void **cookiep)
+{
+	struct gpiopic_intsrc *gisrc;
+	int err;
+
+	KASSERT(gpiopic_check_intr_pin(gpiopic, pin) == 0,
+	    ("setup_intr for unsupported pin %u", pin));
+	gisrc = &gpiopic->intr_srcs[pin];
+	err = intr_event_add_handler(gisrc->is_event,
+	    name, filter, handler, arg,
+	    intr_priority(flags), flags, cookiep);
+	if (err == 0) {
+		sx_xlock(&gpiopic->intrsrc_lock);
+		gisrc->is_handlers++;
+		if (gisrc->is_handlers == 1) {
+			gpiopic_enable_intr(gisrc);
+			gpiopic_unmask_intr(gisrc);	/* unmask source */
+		}
+		sx_xunlock(&gpiopic->intrsrc_lock);
+	}
+	return (err);
+}
+int
+gpiobus_setup_intr(device_t bus, device_t dev, struct resource *irq,
+		 int flags, driver_filter_t filter, void (*ihand)(void *),
+		 void *arg, void **cookiep);
+
+int
+gpiobus_setup_intr(device_t bus, device_t dev, struct resource *irq,
+		 int flags, driver_filter_t filter, void (*ihand)(void *),
+		 void *arg, void **cookiep)
+{
+	struct gpiobus_softc *sc;
+	int err;
+
+	printf("%s %d\n", __func__, __LINE__);
+
+	sc = device_get_softc(bus);
+	if (!rman_is_region_manager(irq, &sc->sc_intr_rman))
+		return (EINVAL);
+	printf("%s %d\n", __func__, __LINE__);
+
+	*cookiep = NULL;
+	if ((rman_get_flags(irq) & RF_SHAREABLE) == 0)
+		flags |= INTR_EXCL;
+	printf("%s %d\n", __func__, __LINE__);
+
+	err = rman_activate_resource(irq);
+	if (err != 0)
+		return (err);
+	printf("%s %d\n", __func__, __LINE__);
+
+	err = gpiopic_add_handler(device_get_nameunit(dev), sc->sc_pic,
+	    rman_get_start(irq), filter, ihand, arg, flags, cookiep);
+	printf("%s %d\n", __func__, __LINE__);
+	return (err);
+}
+
+static int
+gpiopic_remove_handler(void *cookie)
+{
+	struct gpiopic *gpiopic;
+	struct gpiopic_intsrc *gisrc;
+	int err;
+
+	gisrc = intr_handler_source(cookie);
+	if (gisrc == NULL)
+		return (EINVAL);
+
+	gpiopic = gisrc->is_pic;
+	err = intr_event_remove_handler(cookie);
+	if (err == 0) {
+		sx_xlock(&gpiopic->intrsrc_lock);
+		gisrc->is_handlers--;
+		if (gisrc->is_handlers == 0) {
+			gpiopic_mask_intr(gisrc);	/* mask source */
+			gpiopic_disable_intr(gisrc);
+		}
+		sx_xunlock(&gpiopic->intrsrc_lock);
+	}
+	return (err);
+}
+
+static int
+gpiobus_teardown_intr(device_t bus, device_t dev, struct resource *r,
+    void *ih)
+{
+	struct gpiobus_softc *sc;
+	int err;
+
+	sc = device_get_softc(bus);
+	if (!rman_is_region_manager(r, &sc->sc_intr_rman))
+		return (EINVAL);
+	err = gpiopic_remove_handler(ih);
+	return (err);
+}
+
+static int
+gpiopic_describe(void *ih, const char *descr)
+{
+	struct gpiopic_intsrc *gisrc;
+	int err;
+
+	gisrc = intr_handler_source(ih);
+	if (gisrc == NULL)
+		return (EINVAL);
+	err = intr_event_describe_handler(gisrc->is_event, ih, descr);
+	return (err);
+}
+
+static int
+gpiobus_describe_intr(device_t bus, device_t child, struct resource *irq,
+    void *cookie, const char *descr)
+{
+	struct gpiobus_softc *sc;
+	int err;
+
+	sc = device_get_softc(bus);
+	if (!rman_is_region_manager(irq, &sc->sc_intr_rman))
+		return (EINVAL);
+	err = gpiopic_describe(cookie, descr);
+	return (err);
+}
+
+static int
+gpiobus_config_intr(device_t dev, int irq, enum intr_trigger trig,
+    enum intr_polarity pol)
+{
+	return (EOPNOTSUPP);
+}
+
+struct resource *
+gpio_alloc_intr_resource(device_t consumer_dev, int rid, u_int alloc_flags,
+    gpio_pin_t pin, uint32_t intr_mode)
+{
+	struct resource *res;
+	struct gpiobus_softc *sc;
+	struct gpiopic_intsrc *gisrc;
+	device_t busdev;
+	uint32_t caps;
+	int err;
+
+	switch (intr_mode) {
+	case GPIO_INTR_EDGE_FALLING:
+	case GPIO_INTR_EDGE_RISING:
+	case GPIO_INTR_EDGE_BOTH:
+	case GPIO_INTR_LEVEL_LOW:
+	case GPIO_INTR_LEVEL_HIGH:
+	case GPIO_INTR_CONFORM:
+		break;
+	default:
+		device_printf(consumer_dev,
+		    "invalid interrupt mode 0x%08x\n", intr_mode);
+		return (NULL);
+	}
+
+	err = GPIO_PIN_GETCAPS(pin->dev, pin->pin, &caps);
+	if (err != 0) {
+		device_printf(consumer_dev,
+		    "cannot get pin %u capabilities\n", pin->pin);
+		return (NULL);
+	}
+	if ((intr_mode & caps) == 0) {
+		device_printf(consumer_dev,
+		    "pin %u does not support interrupt mode 0x%08x "
+		    "(caps 0x%08x)\n", pin->pin, intr_mode, caps);
+		return (NULL);
+	}
+
+	busdev = GPIO_GET_BUS(pin->dev);
+	sc = device_get_softc(busdev);
+	err = gpiopic_check_intr_pin(sc->sc_pic, pin->pin);
+	if (err != 0) {
+		device_printf(busdev, "PIC not set up or bad pin %u\n",
+		    pin->pin);
+		return (NULL);
+	}
+
+	KASSERT(sc->sc_pins[pin->pin].mapped,
+	    ("%s: unmapped pin %u", __func__, pin->pin));
+	res = BUS_ALLOC_RESOURCE(busdev, consumer_dev, SYS_RES_IRQ, rid,
+	    pin->pin, pin->pin, 1, alloc_flags);
+	printf("allocated pin %u as irq %d %p\n", pin->pin, rid, res);
+	if (res != NULL && intr_mode != GPIO_INTR_CONFORM) {
+		gisrc = &sc->sc_pic->intr_srcs[pin->pin];
+		gpiopic_config_intr(gisrc, intr_mode);
+	}
+	return (res);
+}
+#endif /* !INTRNG */
+
 static device_method_t gpiobus_methods[] = {
 	/* Device interface */
 	DEVMETHOD(device_probe,		gpiobus_probe),
@@ -1143,9 +1747,15 @@ static device_method_t gpiobus_methods[] = {
 	DEVMETHOD(device_resume,	gpiobus_resume),
 
 	/* Bus interface */
+#ifdef INTRNG
 	DEVMETHOD(bus_setup_intr,	bus_generic_setup_intr),
 	DEVMETHOD(bus_config_intr,	bus_generic_config_intr),
 	DEVMETHOD(bus_teardown_intr,	bus_generic_teardown_intr),
+#else
+	DEVMETHOD(bus_setup_intr,	gpiobus_setup_intr),
+	DEVMETHOD(bus_config_intr,	gpiobus_config_intr),
+	DEVMETHOD(bus_teardown_intr,	gpiobus_teardown_intr),
+#endif
 	DEVMETHOD(bus_delete_resource,	bus_generic_rl_delete_resource),
 	DEVMETHOD(bus_get_resource,	bus_generic_rl_get_resource),
 	DEVMETHOD(bus_set_resource,	bus_generic_rl_set_resource),
