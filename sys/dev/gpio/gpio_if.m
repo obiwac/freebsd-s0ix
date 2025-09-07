@@ -211,3 +211,37 @@ METHOD int get_pin_list {
 	device_t dev;
 	uint32_t *pin_list;
 } DEFAULT gpio_default_get_pin_list;
+
+#
+# Methods for interrupt handling on !INTRNG platforms.
+#
+METHOD void pin_config_intr {
+	device_t dev;
+	uint32_t pin_num;
+	uint32_t intr_mode;
+};
+
+METHOD void pin_enable_intr {
+	device_t dev;
+	uint32_t pin_num;
+};
+
+METHOD void pin_disable_intr {
+	device_t dev;
+	uint32_t pin_num;
+};
+
+METHOD void pin_eoi {
+	device_t dev;
+	uint32_t pin_num;
+};
+
+METHOD void pin_mask_intr {
+	device_t dev;
+	uint32_t pin_num;
+};
+
+METHOD void pin_unmask_intr {
+	device_t dev;
+	uint32_t pin_num;
+};
