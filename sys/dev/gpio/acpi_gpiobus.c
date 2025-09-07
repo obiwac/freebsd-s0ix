@@ -27,7 +27,9 @@
 
 #include <sys/types.h>
 #include <sys/bus.h>
+#include <sys/eventhandler.h>
 #include <sys/kernel.h>
+#include <sys/malloc.h>
 #include <sys/module.h>
 #include <sys/gpio.h>
 
@@ -39,18 +41,37 @@
 #include <dev/gpio/gpiobus_internal.h>
 #include <sys/sbuf.h>
 
-#include "gpiobus_if.h"
 #include "gpio_intr_if.h"
 
+struct acpi_gpiobus_pin_intr {
+	device_t	busdev;
+	/*
+	 * The ACPI handle to the device the interrupt should be given to, in
+	 * other words the container of _CRS.
+	 */
+	ACPI_HANDLE	container;
+	/*
+	 * TODO Maybe we do gpio_pin_t pin here instead and use
+	 * gpio_pin_get_by_bus_pinnum when populating this struct.  We've just
+	 * gotta remember to release it if we do (which is annoying ig).
+	 */
+	uint16_t	pinnum;
+	uint32_t	flags;
+};
+
 struct acpi_gpiobus_softc {
-	struct gpiobus_softc	super_sc;
-	ACPI_CONNECTION_INFO	handler_info;
+	struct gpiobus_softc		super_sc;
+	ACPI_CONNECTION_INFO		handler_info;
+
+	struct acpi_gpiobus_pin_intr	*pin_intrs;
+	size_t				pin_intr_count;
+	eventhandler_tag		attach_eh_tag;
 };
 
 struct acpi_gpiobus_ctx {
-	struct gpiobus_softc	*sc;
-	ACPI_HANDLE		dev_handle;
-	ACPI_HANDLE		visiting_dev_handle;
+	struct acpi_gpiobus_softc	*sc;
+	ACPI_HANDLE			dev_handle;
+	ACPI_HANDLE			visiting_dev_handle;
 };
 
 struct acpi_gpiobus_ivar
@@ -115,12 +136,12 @@ acpi_gpiobus_visit_crs(ACPI_RESOURCE *res, void *context)
 {
 	ACPI_RESOURCE_GPIO *gpio_res = &res->Data.Gpio;
 	struct acpi_gpiobus_ctx *ctx = context;
-	struct gpiobus_softc *super_sc = ctx->sc;
+	struct acpi_gpiobus_softc *sc = ctx->sc;
+	struct gpiobus_softc *super_sc = &sc->super_sc;
+	struct acpi_gpiobus_pin_intr *pin_intr;
 	ACPI_HANDLE bus_handle;
-	device_t container;
 	device_t busdev;
 	uint32_t flags, i;
-	int err;
 
 	if (res->Type != ACPI_RESOURCE_TYPE_GPIO)
 		return (AE_OK);
@@ -138,24 +159,17 @@ acpi_gpiobus_visit_crs(ACPI_RESOURCE *res, void *context)
 	}
 
 	/*
-	 * Look at the device this _CRS belongs to and see if it has a driver
-	 * attached to it.  If so, allocate interrupts for each pin and pass
-	 * them to the device.
-	 */
-	MPASS(ctx->visiting_dev_handle != NULL);
-	container = acpi_get_device(ctx->visiting_dev_handle);
-
-	/*
 	 * The bus device here is the specific GPIO controller.  We call
 	 * GPIO_GET_BUS() on it to get the actual generic gpiobus device, which
 	 * is added as a child under the GPIO controller.
+	 *
+	 * TODO What happens if acpi_get_device fails?
 	 */
 	busdev = GPIO_GET_BUS(acpi_get_device(bus_handle));
 
 	flags = acpi_gpiobus_convflags(gpio_res);
 	for (i = 0; i < gpio_res->PinTableLength; i++) {
 		UINT16 pin = gpio_res->PinTable[i];
-		gpio_pin_t gpio_pin;
 
 		if (__predict_false(pin >= super_sc->sc_npins)) {
 			device_printf(super_sc->sc_busdev,
@@ -166,59 +180,23 @@ acpi_gpiobus_visit_crs(ACPI_RESOURCE *res, void *context)
 
 		printf("==== %s: Pin=%u, Flags=0x%x\n", __func__, pin, flags);
 
-		/*
-		 * Get pin & set flags.
-		 *
-		 * TODO Release pin.
-		 */
-		err = gpio_pin_get_by_bus_pinnum(busdev, pin, &gpio_pin);
-		if (err != 0) {
-			device_printf(super_sc->sc_busdev,
-			    "cannot acquire pin %d\n", pin);
-			continue;
-		}
-		gpio_pin_setflags(gpio_pin, flags & ~GPIO_INTR_MASK);
+		// TODO Any locking required here? assuming not.
+		// TODO Free this memory too.
 
-		if (device_is_attached(container) == 0) {
-			/*
-			 * No driver attached, nothing to do.
-			 *
-			 * TODO In the future we're going to want to remember
-			 * these so that we can also pass interrupts to devices
-			 * which attach after we have gone through this.
-			 */
-			gpio_pin_release(gpio_pin);
+		sc->pin_intrs = realloc(sc->pin_intrs, (sc->pin_intr_count + 1)
+		    * sizeof(*sc->pin_intrs), M_DEVBUF, M_NOWAIT);
+		if (sc->pin_intrs == NULL) {
+			device_printf(super_sc->sc_dev, "failed to allocate pin interrupts!");
+			sc->pin_intrs = NULL;
+			sc->pin_intr_count = 0;
 			continue;
 		}
+		pin_intr = &sc->pin_intrs[sc->pin_intr_count++];
 
-		/*
-		 * Allocate interrupt resource for the pin on the container
-		 * device and pass it to it.
-		 */
-		int rid = 0; // TODO
-		u_int alloc_flags = RF_ACTIVE;
-#ifdef NOT_YET /* XXX Could just remove as GPIO_INTR_SHAREABLE will not be set right now. */
-		if (flags & GPIO_INTR_SHAREABLE)
-			alloc_flags |= RF_SHAREABLE;
-#endif
-		uint32_t intr_mode = flags | GPIO_INTR_MASK; /* XXX Is this right? */
-		struct resource *intr_res = gpio_alloc_intr_resource(busdev,
-		    &rid, alloc_flags, gpio_pin, intr_mode);
-		if (intr_res == NULL) {
-			device_printf(super_sc->sc_busdev,
-			    "cannot allocate interrupt for pin %d\n", pin);
-			gpio_pin_release(gpio_pin);
-			continue;
-		}
-
-		if (GPIO_INTR_GIVE(container, busdev, intr_res) != 0) {
-			device_printf(super_sc->sc_busdev,
-			    "cannot setup interrupt for pin %d\n", pin);
-			bus_release_resource(container, SYS_RES_IRQ, rid,
-			    intr_res);
-			gpio_pin_release(gpio_pin);
-			continue;
-		}
+		pin_intr->busdev = busdev;
+		pin_intr->container = ctx->visiting_dev_handle;
+		pin_intr->pinnum = pin;
+		pin_intr->flags = flags;
 	}
 
 	return (AE_OK);
@@ -263,9 +241,8 @@ acpi_gpiobus_visit_device(ACPI_HANDLE handle, UINT32 depth, void *context,
 	if (!acpi_has_hid(handle))
 		return (AE_OK);
 
-	ctx->visiting_dev_handle = handle;
-
 	/* Look for GPIO resources */
+	ctx->visiting_dev_handle = handle;
 	AcpiWalkResources(handle, "_CRS", acpi_gpiobus_visit_crs, ctx);
 
 	return (AE_OK);
@@ -409,6 +386,94 @@ acpi_gpiobus_probe(device_t dev)
 	return (BUS_PROBE_DEFAULT);
 }
 
+static int irq_rid = 0;
+
+static void
+acpi_gpiobus_give_gpio_intr(struct acpi_gpiobus_softc *sc,
+    struct acpi_gpiobus_pin_intr *pin_intr, device_t dev)
+{
+	int err;
+	/* TODO Should we be using busdev for device_printf? */
+	const device_t busdev = pin_intr->busdev;
+	const uint16_t pinnum = pin_intr->pinnum;
+	const uint32_t flags = pin_intr->flags;
+	gpio_pin_t pin;
+	uint32_t alloc_flags, intr_mode;
+	struct resource *res;
+
+	err = gpio_pin_get_by_bus_pinnum(busdev, pinnum, &pin);
+	if (err != 0) {
+		device_printf(busdev, "cannot acquire pin %d\n", pinnum);
+		return;
+	}
+	gpio_pin_setflags(pin, flags & ~GPIO_INTR_MASK);
+
+	/*
+	 * TODO Create proxy device to receive the interrupts?
+	 * So we can use regular bus_* functions in consumers.
+	 */
+
+	/* Allocate interrupt resource for the pin. */
+
+	alloc_flags = RF_ACTIVE;
+#ifdef NOT_YET /* XXX Could just remove as GPIO_INTR_SHAREABLE will not be set right now. */
+	if (flags & GPIO_INTR_SHAREABLE)
+		alloc_flags |= RF_SHAREABLE;
+#endif
+	intr_mode = flags & GPIO_INTR_MODE_MASK;
+
+	int rid = irq_rid; // TODO Gotta do this correctly.
+	res = gpio_alloc_intr_resource(busdev, rid, alloc_flags, pin,
+	    intr_mode);
+	if (res == NULL) {
+		device_printf(busdev, "cannot allocate interrupt resource for "
+		    "pin %d\n", pinnum);
+		gpio_pin_release(pin);
+		return;
+	}
+	irq_rid++;
+
+	err = GPIO_INTR_GIVE(dev, busdev, res);
+	if (err != 0) {
+		device_printf(busdev, "cannot give interrupt for pin %d to "
+		    "%s: %d\n", pinnum, device_get_nameunit(dev), err);
+		// TODO Figure this shit out.
+		// bus_release_resource();
+		int gpiobus_release_resource(device_t, device_t,
+		    struct resource *);
+		gpiobus_release_resource(busdev, NULL, res);
+		gpio_pin_release(pin);
+		return;
+	}
+
+	device_printf(busdev, "setup and gave interrupt for pin %d to %s\n",
+	    pinnum, device_get_nameunit(dev));
+}
+
+/*
+ * Go through our saved container ACPI handles and if we can get a device which
+ * matches the newly attached device, we can set up and give it our GPIO
+ * interrupt(s).
+ */
+static void
+acpi_gpiobus_attach_handler(void *arg, device_t dev)
+{
+	struct acpi_gpiobus_softc *sc = arg;
+	struct acpi_gpiobus_pin_intr *pin_intr;
+
+	for (size_t i = 0; i < sc->pin_intr_count; i++) {
+		pin_intr = &sc->pin_intrs[i];
+		if (acpi_get_handle(dev) != pin_intr->container)
+			continue;
+		// if (dev != acpi_get_device(pin_intr->container))
+		// 	continue;
+
+		device_printf(sc->super_sc.sc_dev, "giving GPIO interrupt to "
+		    "newly attached device %s\n", device_get_nameunit(dev));
+		acpi_gpiobus_give_gpio_intr(sc, pin_intr, dev);
+	}
+}
+
 static int
 acpi_gpiobus_attach(device_t dev)
 {
@@ -438,8 +503,11 @@ acpi_gpiobus_attach(device_t dev)
 		return (ENXIO);
 	}
 
+	sc->pin_intr_count = 0;
+	sc->pin_intrs = NULL;
+
 	ctx.dev_handle = handle;
-	ctx.sc = &sc->super_sc;
+	ctx.sc = sc;
 
 	status = AcpiWalkNamespace(ACPI_TYPE_DEVICE, ACPI_ROOT_OBJECT,
 	    ACPI_UINT32_MAX, acpi_gpiobus_visit_device, NULL, &ctx, NULL);
@@ -449,16 +517,24 @@ acpi_gpiobus_attach(device_t dev)
 
 	/* Look for AEI child */
 	acpi_gpiobus_attach_aei(sc, handle);
+
+	/*
+	 * Register eventhandler for device attaches so that we can pass
+	 * them GPIO interrupts if necessary.
+	 */
+	sc->attach_eh_tag = EVENTHANDLER_REGISTER(device_attach,
+	    acpi_gpiobus_attach_handler, sc, EVENTHANDLER_PRI_LAST);
+
 	return (0);
 }
 
 static int
 acpi_gpiobus_detach(device_t dev)
 {
-	struct gpiobus_softc *super_sc;
+	struct acpi_gpiobus_softc *sc = device_get_softc(dev);
+	struct gpiobus_softc *super_sc = &sc->super_sc;
 	ACPI_STATUS status;
 
-	super_sc = device_get_softc(dev);
 	status = AcpiRemoveAddressSpaceHandler(
 	    acpi_get_handle(super_sc->sc_dev), ACPI_ADR_SPACE_GPIO,
 	    acpi_gpiobus_space_handler
@@ -467,6 +543,8 @@ acpi_gpiobus_detach(device_t dev)
 	if (ACPI_FAILURE(status))
 		device_printf(dev,
 		    "Failed to remove GPIO address space handler\n");
+
+	EVENTHANDLER_DEREGISTER_NOWAIT(device_attach, sc->attach_eh_tag);
 
 	return (gpiobus_detach(dev));
 }
