@@ -458,6 +458,8 @@ AcpiEnterSleepStatePrep (
 
     ACPI_FUNCTION_TRACE (AcpiEnterSleepStatePrep);
 
+    printf("%s: %d, %d\n", __func__, __LINE__, SleepState);
+
 
     Status = AcpiGetSleepTypeData (SleepState,
         &AcpiGbl_SleepTypeA, &AcpiGbl_SleepTypeB);
@@ -465,12 +467,14 @@ AcpiEnterSleepStatePrep (
     {
         return_ACPI_STATUS (Status);
     }
+    printf("%s: %d\n", __func__, __LINE__);
 
     Status = AcpiGetSleepTypeData (ACPI_STATE_S0,
         &AcpiGbl_SleepTypeAS0, &AcpiGbl_SleepTypeBS0);
     if (ACPI_FAILURE (Status)) {
         AcpiGbl_SleepTypeAS0 = ACPI_SLEEP_TYPE_INVALID;
     }
+    printf("%s: %d\n", __func__, __LINE__);
 
     /* Execute the _PTS method (Prepare To Sleep) */
 
@@ -478,18 +482,21 @@ AcpiEnterSleepStatePrep (
     ArgList.Pointer = &Arg;
     Arg.Type = ACPI_TYPE_INTEGER;
     Arg.Integer.Value = SleepState;
+    printf("%s: %d\n", __func__, __LINE__);
 
     Status = AcpiEvaluateObject (NULL, METHOD_PATHNAME__PTS, &ArgList, NULL);
     if (ACPI_FAILURE (Status) && Status != AE_NOT_FOUND)
     {
         return_ACPI_STATUS (Status);
     }
+    printf("%s: %d\n", __func__, __LINE__);
 
     /* Setup the argument to the _SST method (System STatus) */
 
     switch (SleepState)
     {
     case ACPI_STATE_S0:
+    printf("%s: %d\n", __func__, __LINE__);
 
         SstValue = ACPI_SST_WORKING;
         break;
@@ -497,20 +504,24 @@ AcpiEnterSleepStatePrep (
     case ACPI_STATE_S1:
     case ACPI_STATE_S2:
     case ACPI_STATE_S3:
+    printf("%s: %d\n", __func__, __LINE__);
 
         SstValue = ACPI_SST_SLEEPING;
         break;
 
     case ACPI_STATE_S4:
+    printf("%s: %d\n", __func__, __LINE__);
 
         SstValue = ACPI_SST_SLEEP_CONTEXT;
         break;
 
     default:
+    printf("%s: %d\n", __func__, __LINE__);
 
         SstValue = ACPI_SST_INDICATOR_OFF; /* Default is off */
         break;
     }
+    printf("%s: %d\n", __func__, __LINE__);
 
     /*
      * Set the system indicators to show the desired sleep state.
