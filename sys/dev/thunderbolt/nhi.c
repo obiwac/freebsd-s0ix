@@ -1091,6 +1091,10 @@ nhi_deregister_pdf(struct nhi_ring_pair *rp, struct nhi_dispatch *tx,
  * descriptor, and we know if we have reached the last descriptor that the
  * hardware touched.  This technique saves at least 2 MEMIO reads per
  * interrupt.
+ *
+ * TODO Is this actually okay?  What if we fail to get a completion interrupts
+ * but hardware updated CI anyway?  I know this can happen, but is this an
+ * issue?
  */
 void
 nhi_intr(void *data)
