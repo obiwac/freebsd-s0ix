@@ -89,69 +89,19 @@ static driver_t nhi_pci_driver = {
 	sizeof(struct nhi_softc)
 };
 
-struct nhi_ident {
-	uint16_t	vendor;
-	uint16_t	device;
-	uint16_t	subvendor;
-	uint16_t	subdevice;
-	uint32_t	flags;
-	const char	*desc;
-} nhi_identifiers[] = {
-	{ VENDOR_INTEL, DEVICE_AR_2C_NHI, 0xffff, 0xffff, NHI_TYPE_AR,
-	    "Thunderbolt 3 NHI (Alpine Ridge 2C)" },
-	{ VENDOR_INTEL, DEVICE_AR_DP_B_NHI, 0xffff, 0xffff, NHI_TYPE_AR,
-	    "Thunderbolt 3 NHI (Alpine Ridge 4C Rev B)" },
-	{ VENDOR_INTEL, DEVICE_AR_DP_C_NHI, 0xffff, 0xffff, NHI_TYPE_AR,
-	    "Thunderbolt 3 NHI (Alpine Ridge 4C Rev C)" },
-	{ VENDOR_INTEL, DEVICE_AR_LP_NHI, 0xffff, 0xffff, NHI_TYPE_AR,
-	    "Thunderbolt 3 NHI (Alpine Ridge LP 2C)" },
-	{ VENDOR_INTEL, DEVICE_ICL_NHI_0, 0xffff, 0xffff, NHI_TYPE_ICL,
-	    "Thunderbolt 3 NHI Port 0 (IceLake)" },
-	{ VENDOR_INTEL, DEVICE_ICL_NHI_1, 0xffff, 0xffff, NHI_TYPE_ICL,
-	    "Thunderbolt 3 NHI Port 1 (IceLake)" },
-	{ VENDOR_AMD, DEVICE_PINK_SARDINE_0, 0xffff, 0xffff, NHI_TYPE_USB4,
-	    "USB4 NHI Port 0 (Pink Sardine)" },
-	{ VENDOR_AMD, DEVICE_PINK_SARDINE_1, 0xffff, 0xffff, NHI_TYPE_USB4,
-	    "USB4 NHI Port 1 (Pink Sardine)" },
-	{ 0, 0, 0, 0, 0, NULL }
-};
 
 DRIVER_MODULE_ORDERED(nhi, pci, nhi_pci_driver, NULL, NULL,
     SI_ORDER_ANY);
-MODULE_PNP_INFO("U16:vendor;U16:device;V16:subvendor;V16:subdevice;U32:#;D:#",
-    pci, nhi, nhi_identifiers, nitems(nhi_identifiers) - 1);
-
-static struct nhi_ident *
-nhi_find_ident(device_t dev)
-{
-	struct nhi_ident *n;
-
-	for (n = nhi_identifiers; n->vendor != 0; n++) {
-		if (n->vendor != pci_get_vendor(dev))
-			continue;
-		if (n->device != pci_get_device(dev))
-			continue;
-		if ((n->subvendor != 0xffff) &&
-		    (n->subvendor != pci_get_subvendor(dev)))
-			continue;
-		if ((n->subdevice != 0xffff) &&
-		    (n->subdevice != pci_get_subdevice(dev)))
-			continue;
-		return (n);
-	}
-
-	return (NULL);
-}
 
 static int
 nhi_pci_probe(device_t dev)
 {
-	struct nhi_ident *n;
-
 	if (resource_disabled("tb", 0))
 		return (ENXIO);
-	if ((n = nhi_find_ident(dev)) != NULL) {
-		device_set_desc(dev, n->desc);
+	if ((pci_get_class(dev) == PCIC_SERIALBUS)
+	    && (pci_get_subclass(dev) == PCIS_SERIALBUS_USB)
+	    && (pci_get_progif(dev) == PCIP_SERIALBUS_USB_USB4)) {
+		device_set_desc(dev, "Generic USB4 NHI");
 		return (BUS_PROBE_DEFAULT);
 	}
 	return (ENXIO);
@@ -163,14 +113,12 @@ nhi_pci_attach(device_t dev)
 	devclass_t dc;
 	bus_dma_template_t t;
 	struct nhi_softc *sc;
-	struct nhi_ident *n;
 	int error = 0;
 
 	sc = device_get_softc(dev);
 	bzero(sc, sizeof(*sc));
 	sc->dev = dev;
-	n = nhi_find_ident(dev);
-	sc->hwflags = n->flags;
+	sc->hwflags = NHI_TYPE_USB4;
 	nhi_get_tunables(sc);
 
 	tb_debug(sc, DBG_INIT|DBG_FULL, "busmaster status was %s\n",
