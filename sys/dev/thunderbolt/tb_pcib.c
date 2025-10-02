@@ -90,6 +90,10 @@ struct tb_pcib_ident {
 	uint32_t	flags;		/* This follows the tb_softc flags */
 	const char	*desc;
 } tb_pcib_identifiers[] = {
+	{ VENDOR_AMD, TB_DEV_PINK_SARDINE_0, 0xffff, 0xffff,
+	    TB_GEN_USB4|TB_HWIF_USB4, "USB4 PCI-PCI Bridge (Pink Sardine)" },
+	{ VENDOR_AMD, TB_DEV_PINK_SARDINE_1, 0xffff, 0xffff,
+	    TB_GEN_USB4|TB_HWIF_USB4, "USB4 PCI-PCI Bridge (Pink Sardine)" },
 	{ 0, 0, 0, 0, 0, NULL }
 };
 
