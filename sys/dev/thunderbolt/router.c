@@ -401,6 +401,7 @@ tb_router_suspend(struct router_softc *sc)
 	 */
 	reg |= ROUTER_SLP;
 	reg &= ~(ROUTER_WOP | ROUTER_WOU | ROUTER_WOD);
+	reg |= ROUTER_WOU;
 	err = tb_config_router_write(sc, ROUTER_CS_5, 1, &reg);
 	if (err != 0) {
 		tb_debug(sc, DBG_ROUTER, "Cannot write to ROUTER_CS5\n");
@@ -918,7 +919,7 @@ router_response_intr(void *context, union nhi_ring_desc *ring, struct nhi_cmd_fr
 	}
 
 	if (eof == PDF_READ) {
-		for (i = 0; i < len; i++)
+		for (i = 0; i < MIN(len, cmd->nhicmd->resp_len); i++)
 			cmd->nhicmd->resp_buffer[i] = be32toh(read->data[i]);
 	}
 
@@ -1219,6 +1220,10 @@ tb_config_get_lc_uuid(struct router_softc *rsc, uint8_t *uuid)
 	u_int error, offset;
 	uint32_t buf[8];
 
+	tb_debug(rsc, DBG_ROUTER, "Fetching router LC UUID is not supported at"
+	    "the moment\n");
+	return (-1);
+
 	bzero(buf, sizeof(buf));
 
 	error = tb_config_find_router_vsec(rsc, TB_CFG_VSEC_LC, &offset);
@@ -1228,7 +1233,10 @@ tb_config_get_lc_uuid(struct router_softc *rsc, uint8_t *uuid)
 		return (error);
 	}
 
+	printf("Found LC registers at offset %d\n", offset);
+
 	error = tb_config_router_read(rsc, offset + TB_LC_UUID, 4, buf);
+	printf("dummy\n");
 	if (error != 0) {
 		tb_debug(rsc, DBG_ROUTER, "Error fetching UUID: %d\n", error);
 		return (error);
