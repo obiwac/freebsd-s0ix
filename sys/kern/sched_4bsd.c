@@ -186,6 +186,7 @@ struct pcpuidlestat {
 	u_int oldidlecalls;
 };
 DPCPU_DEFINE_STATIC(struct pcpuidlestat, idlestat);
+DPCPU_DEFINE_STATIC(int, do_idle);
 
 static void
 setup_runqs(void)
@@ -1501,6 +1502,8 @@ sched_4bsd_choose(void)
 	struct runq *runq;
 
 	mtx_assert(&sched_lock,  MA_OWNED);
+	if (__predict_false(*DPCPU_PTR(do_idle)))
+		return (PCPU_GET(idlethread));
 #ifdef SMP
 	struct thread *tdcpu;
 
@@ -1554,6 +1557,27 @@ sched_4bsd_preempt(struct thread *td)
 		    SWT_REMOTEPREEMPT;
 		mi_switch(flags);
 	}
+}
+
+static void
+sched_4bsd_do_idle(struct thread *td, bool idle)
+{
+	int flags;
+
+	thread_lock(td);
+	*DPCPU_PTR(do_idle) = idle;
+	SDT_PROBE2(sched, , , surrender, td, td->td_proc);
+	if (td->td_critnest > 1) {
+		td->td_owepreempt = 1;
+	} else {
+		flags = SW_INVOL | SW_PREEMPT;
+		flags |= TD_IS_IDLETHREAD(td) ? SWT_REMOTEWAKEIDLE :
+		    SWT_REMOTEPREEMPT;
+		mi_switch(flags);
+		/* Switch dropped thread lock. */
+		return;
+	}
+	thread_unlock(td);
 }
 
 static void
