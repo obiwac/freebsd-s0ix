@@ -284,6 +284,7 @@ struct tdq {
 	 */
 	u_char		tdq_ts_ticks;
 	int		tdq_id;		/* (c) cpuid. */
+	int		tdq_do_idle;
 	struct runq	tdq_runq;	/* (t) Run queue. */
 	char		tdq_name[TDQ_NAME_LEN];
 #ifdef KTR
@@ -1462,9 +1463,10 @@ llc:
 		cpu = sched_lowest(ccg, mask, pri, INT_MAX, ts->ts_cpu, r);
 		if (cpu >= 0)
 			SCHED_STAT_INC(pickcpu_intrbind);
-	} else
-	/* Search the LLC for the least loaded idle CPU we can run now. */
-	if (ccg != NULL) {
+	} else if (ccg != NULL) {
+		/*
+		 * Search the LLC for the least loaded idle CPU we can run now.
+		 */
 		cpu = sched_lowest(ccg, mask, max(pri, PRI_MAX_TIMESHARE),
 		    INT_MAX, ts->ts_cpu, r);
 		if (cpu >= 0)
@@ -1538,6 +1540,8 @@ tdq_choose(struct tdq *tdq)
 	struct thread *td;
 
 	TDQ_LOCK_ASSERT(tdq, MA_OWNED);
+	if (__predict_false(tdq->tdq_do_idle))
+		return (NULL); /* Return NULL for idle thread */
 	td = runq_choose_realtime(&tdq->tdq_runq);
 	if (td != NULL)
 		return (td);
@@ -2623,15 +2627,10 @@ sched_ule_exit_thread(struct thread *td, struct thread *child)
 }
 
 static void
-sched_ule_preempt(struct thread *td)
+sched_ule_preempt_locked(struct tdq *tdq, struct thread *td)
 {
-	struct tdq *tdq;
 	int flags;
 
-	SDT_PROBE2(sched, , , surrender, td, td->td_proc);
-
-	thread_lock(td);
-	tdq = TDQ_SELF();
 	TDQ_LOCK_ASSERT(tdq, MA_OWNED);
 	if (td->td_priority > tdq->tdq_lowpri) {
 		if (td->td_critnest == 1) {
@@ -2643,10 +2642,33 @@ sched_ule_preempt(struct thread *td)
 			return;
 		}
 		td->td_owepreempt = 1;
-	} else {
+	} else
 		tdq->tdq_owepreempt = 0;
-	}
 	thread_unlock(td);
+}
+
+static void
+sched_ule_preempt(struct thread *td)
+{
+	struct tdq *tdq;
+
+	SDT_PROBE2(sched, , , surrender, td, td->td_proc);
+
+	thread_lock(td);
+	tdq = TDQ_SELF();
+	sched_ule_preempt_locked(tdq, td);
+}
+
+static void
+sched_ule_do_idle(struct thread *td, bool do_idle)
+{
+	struct tdq *tdq;
+
+	thread_lock(td);
+	tdq = TDQ_SELF();
+	TDQ_LOCK_ASSERT(tdq, MA_OWNED);
+	tdq->tdq_do_idle = do_idle;
+	sched_ule_preempt_locked(tdq, td);
 }
 
 /*
@@ -2799,6 +2821,8 @@ sched_ule_choose(void)
 	tdq = TDQ_SELF();
 	TDQ_LOCK_ASSERT(tdq, MA_OWNED);
 	td = tdq_choose(tdq);
+	KASSERT(td != PCPU_GET(idlethread), ("sched_choose: idle thread "
+	    "explicitly returned; tdq_choose should return NULL instead"));
 	if (td != NULL) {
 		tdq_runq_rem(tdq, td);
 		tdq->tdq_lowpri = td->td_priority;
@@ -3425,6 +3449,7 @@ struct sched_instance sched_ule_instance = {
 	SLOT(clock),
 	SLOT(idletd),
 	SLOT(preempt),
+	SLOT(do_idle),
 	SLOT(relinquish),
 	SLOT(rem),
 	SLOT(wakeup),
