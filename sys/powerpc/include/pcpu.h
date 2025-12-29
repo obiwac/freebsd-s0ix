@@ -170,6 +170,21 @@ __curthread(void)
 #define	PCPU_PTR(member)	(&pcpup->pc_ ## member)
 #define	PCPU_SET(member,value)	(pcpup->pc_ ## member = (value))
 
+static __inline u_int
+__get_bsp_cpuid(void)
+{
+	struct pcpu *pc;
+
+	STAILQ_FOREACH(pc, &cpuhead, pc_allcpu) {
+		if (pc->pc_bsp)
+			return pc->pc_cpuid;
+	}
+	panic("No CPU marked as BSP.\n");
+	return (0);
+}
+#define	GET_BSP_CPUID() (__get_bsp_cpuid())
+#define	IS_BSP()	(PCPU_GET(cpuid) == GET_BSP_CPUID())
+
 #endif	/* _KERNEL */
 
 #endif	/* !_MACHINE_PCPU_H_ */
