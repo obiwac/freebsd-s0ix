@@ -406,3 +406,8 @@ options 	IICHID_SAMPLING		# Workaround missing GPIO INTR support
 # EFI devices
 device		efidev			# EFI pseudo-device
 device		efirtc			# EFI RTC
+
+options		COUNT_IPIS
+options		KBDIO_DEBUG=6
+options		KTR
+# options		KASAN
