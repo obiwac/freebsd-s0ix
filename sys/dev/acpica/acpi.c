@@ -3639,11 +3639,20 @@ do_sleep(struct acpi_softc *sc, enum acpi_sleep_state *slp_state,
 
 #if defined(__i386__) || defined(__amd64__)
 static void
+set_cpu_idle(void *data)
+{
+	bool idle = *(bool*) data;
+
+	sched_do_idle(curthread, idle);
+}
+
+static void
 do_idle(struct acpi_softc *sc, enum acpi_sleep_state *slp_state,
     register_t rflags)
 {
     struct pcpu		*pc;
     cpuset_t		other_cpus;
+    bool		idle;
     struct monitorbuf	*mb;
     size_t		intr_count;
 
@@ -3678,9 +3687,8 @@ do_idle(struct acpi_softc *sc, enum acpi_sleep_state *slp_state,
     other_cpus = all_cpus;
     CPU_CLR(curcpu, &other_cpus);
 
-    /* TODO Preempt all CPU schedulers to get them to enter their idle loop. */
-    smp_rendezvous_cpus(other_cpus, smp_no_rendezvous_barrier, NULL,
-	smp_no_rendezvous_barrier, NULL);
+    idle = true;
+    smp_rendezvous_cpus(other_cpus, NULL, set_cpu_idle, NULL, &idle);
 
     /*
      * Suspend-to-idle loop.
@@ -3725,9 +3733,11 @@ do_idle(struct acpi_softc *sc, enum acpi_sleep_state *slp_state,
     device_printf(sc->acpi_dev, "Suspend-to-idle interrupted %zu times.\n",
 	intr_count);
 
-    /* TODO Preempt all schedulers to kick CPUs out of idle. */
-    smp_rendezvous_cpus(other_cpus, smp_no_rendezvous_barrier, NULL,
-	smp_no_rendezvous_barrier, NULL);
+    printf("Suspend-to-idle interrupted %zu times.\n", intr_count);
+
+    /* Unidle all other CPUs.  The schedulers will immediately be preempted. */
+    idle = false;
+    smp_rendezvous_cpus(other_cpus, NULL, set_cpu_idle, NULL, &idle);
 
     /* Resume interrupts. */
     intr_resume(false);
