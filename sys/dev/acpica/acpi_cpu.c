@@ -526,7 +526,7 @@ static int
 is_idle_disabled(struct acpi_cpu_softc *sc)
 {
 
-    return (sc->cpu_disable_idle);
+    return (FALSE); // (sc->cpu_disable_idle);
 }
 #endif
 
@@ -1089,6 +1089,7 @@ static void
 acpi_cpu_idle(sbintime_t sbt)
 {
     struct	acpi_cpu_softc *sc;
+    // struct	acpi_softc *acpi_sc;
     struct	acpi_cx *cx_next;
     uint64_t	start_ticks, end_ticks;
     uint32_t	start_time, end_time;
@@ -1105,6 +1106,7 @@ acpi_cpu_idle(sbintime_t sbt)
 	acpi_cpu_c1();
 	return;
     }
+    // acpi_sc = acpi_device_get_parent_softc(sc->cpu_dev);
 
     /* If disabled, take the safe path. */
     if (is_idle_disabled(sc)) {
@@ -1234,6 +1236,10 @@ acpi_cpu_idle(sbintime_t sbt)
 	end_time = ((end_ticks - start_ticks) << 20) / cpu_tickrate();
     sc->cpu_prev_sleep = (sc->cpu_prev_sleep * 3 + end_time) / 4;
     sc->cpu_cx_duration[cx_next_idx] += end_time;
+
+//    if (acpi_sc->acpi_s2idle_looping)
+//	printf("(S0i3) CPU %d slept in C%d for %d us during idle\n",
+//	    PCPU_GET(cpuid), cx_next->type, (int)end_time);
 }
 #endif
 

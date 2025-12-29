@@ -4523,6 +4523,12 @@ acpiioctl(struct cdev *dev, u_long cmd, caddr_t addr, int flag, struct thread *t
     switch (cmd) {
     case ACPIIO_REQSLPSTATE:
 	sstate = *(int *)addr;
+	/*
+	 * XXX Hack only for sleep testing image.  Need proper kernel interface
+	 * to request sleep types in fine.
+	 */
+	if (sstate == 6)
+	    return (acpi_ReqSleepState(sc, POWER_STYPE_SUSPEND_TO_IDLE));
 	if (sstate != ACPI_STATE_S5)
 	    return (acpi_ReqSleepState(sc, acpi_sstate_to_stype(sstate)));
 	device_printf(sc->acpi_dev, "power off via acpi ioctl not supported\n");
