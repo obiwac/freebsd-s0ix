@@ -81,6 +81,10 @@ get_curthread(void)
 #define	PCPU_PTR(member)	(&get_pcpu()->pc_ ## member)
 #define	PCPU_SET(member,value)	(get_pcpu()->pc_ ## member = (value))
 
+/* CPUIDs are already rotated such that boot HART is always CPUID 0 */
+#define	GET_BSP_CPUID() (0)
+#define	IS_BSP()	(PCPU_GET(cpuid) == GET_BSP_CPUID())
+
 #endif	/* _KERNEL */
 
 #endif	/* !_MACHINE_PCPU_H_ */
