@@ -103,6 +103,7 @@ int tb_router_attach(struct router_softc *, tb_route_t);
 int tb_router_attach_root(struct nhi_softc *, tb_route_t);
 int tb_router_detach(struct router_softc *);
 int tb_router_suspend(struct router_softc *);
+int tb_router_resume(struct router_softc *);
 int tb_config_read(struct router_softc *, u_int, u_int, u_int, u_int,
     uint32_t *);
 int tb_config_read_polled(struct router_softc *, u_int, u_int, u_int, u_int,
