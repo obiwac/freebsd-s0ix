@@ -3741,12 +3741,12 @@ acpi_EnterSleepState(struct acpi_softc *sc, enum power_stype stype)
 #ifdef EARLY_AP_STARTUP
     MPASS(mp_ncpus == 1 || smp_started);
     thread_lock(curthread);
-    sched_bind(curthread, 0);
+    sched_bind(curthread, GET_BSP_CPUID());
     thread_unlock(curthread);
 #else
     if (smp_started) {
 	thread_lock(curthread);
-	sched_bind(curthread, 0);
+	sched_bind(curthread, GET_BSP_CPUID());
 	thread_unlock(curthread);
     }
 #endif
