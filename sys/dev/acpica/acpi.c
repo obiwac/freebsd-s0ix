@@ -3641,10 +3641,13 @@ do_sleep(struct acpi_softc *sc, enum acpi_sleep_state *slp_state,
 static void
 set_cpu_idle(void *data)
 {
+	return;
 	bool idle = *(bool*) data;
 
 	sched_do_idle(curthread, idle);
 }
+
+#include <sys/kdb.h>
 
 static void
 do_idle(struct acpi_softc *sc, enum acpi_sleep_state *slp_state,
@@ -3678,6 +3681,10 @@ do_idle(struct acpi_softc *sc, enum acpi_sleep_state *slp_state,
      */
     intr_enable_src(AcpiGbl_FADT.SciInterrupt);
 
+    kdb_backtrace();
+
+    // TODO We might need to save PCB and restore later.
+
     sc->acpi_s2idle_wake = false;
 
     /*
@@ -3689,6 +3696,9 @@ do_idle(struct acpi_softc *sc, enum acpi_sleep_state *slp_state,
 
     idle = true;
     smp_rendezvous_cpus(other_cpus, NULL, set_cpu_idle, NULL, &idle);
+
+    extern bool in_s2idle;
+    in_s2idle = true;
 
     /*
      * Suspend-to-idle loop.
@@ -3717,6 +3727,8 @@ do_idle(struct acpi_softc *sc, enum acpi_sleep_state *slp_state,
 	 * other kernel threads might be scheduled and prevent us from getting
 	 * scheduled again in a timely manner (or, theoretically, at all).
 	 */
+	// AcpiOsWaitEventsComplete();
+
 	extern struct taskqueue *acpi_taskq;
 	taskqueue_quiesce(acpi_taskq);
 
@@ -3734,6 +3746,8 @@ do_idle(struct acpi_softc *sc, enum acpi_sleep_state *slp_state,
 	intr_count);
 
     printf("Suspend-to-idle interrupted %zu times.\n", intr_count);
+
+    in_s2idle = false;
 
     /* Unidle all other CPUs.  The schedulers will immediately be preempted. */
     idle = false;
