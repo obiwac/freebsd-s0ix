@@ -1561,6 +1561,8 @@ runq_choose_idle(struct runq *const rq)
 	return (runq_first_thread_range(rq, RQ_ID_POL_MIN, RQ_ID_POL_MAX));
 }
 
+#include <sys/kdb.h>
+
 /*
  * Pick the highest priority task we have and return it.
  */
@@ -1570,8 +1572,10 @@ tdq_choose(struct tdq *tdq)
 	struct thread *td;
 
 	TDQ_LOCK_ASSERT(tdq, MA_OWNED);
-	if (__predict_false(tdq->tdq_do_idle))
+	if (__predict_false(tdq->tdq_do_idle)) {
+		kdb_backtrace();
 		return (NULL); /* Return NULL for idle thread */
+	}
 	td = runq_choose_realtime(&tdq->tdq_runq);
 	if (td != NULL)
 		return (td);
