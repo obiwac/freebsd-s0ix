@@ -1562,6 +1562,8 @@ runq_choose_idle(struct runq *const rq)
 	return (runq_first_thread_range(rq, RQ_ID_POL_MIN, RQ_ID_POL_MAX));
 }
 
+#include <sys/kdb.h>
+
 /*
  * Pick the highest priority task we have and return it.
  */
