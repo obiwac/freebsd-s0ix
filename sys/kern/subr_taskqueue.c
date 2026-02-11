@@ -480,6 +480,9 @@ taskqueue_unblock(struct taskqueue *queue)
 	TQ_UNLOCK(queue);
 }
 
+#include <sys/kdb.h>
+bool in_s2idle = false;
+
 static void
 taskqueue_run_locked(struct taskqueue *queue)
 {
@@ -514,6 +517,11 @@ taskqueue_run_locked(struct taskqueue *queue)
 			NET_EPOCH_EXIT(et);
 			in_net_epoch = false;
 		}
+		if (in_s2idle) {
+			printf("okey interesting...\n");
+			kdb_backtrace();
+		}
+
 		task->ta_func(task->ta_context, pending);
 
 		TQ_LOCK(queue);
