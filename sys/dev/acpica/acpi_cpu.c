@@ -154,6 +154,8 @@ static int		 cpu_cx_lowest_lim;
 static bool		 cppc_notify;
 #endif
 
+static bool		 cpu_disable_idle_on_suspend;
+
 static struct acpi_cpu_softc **cpu_softc;
 ACPI_SERIAL_DECL(cpu, "ACPI CPU");
 
@@ -189,6 +191,7 @@ static int	acpi_cpu_duration_counters_sysctl(SYSCTL_HANDLER_ARGS);
 static int	acpi_cpu_set_cx_lowest(struct acpi_cpu_softc *sc);
 static int	acpi_cpu_cx_lowest_sysctl(SYSCTL_HANDLER_ARGS);
 static int	acpi_cpu_global_cx_lowest_sysctl(SYSCTL_HANDLER_ARGS);
+static int	acpi_cpu_disable_idle_on_suspend_sysctl(SYSCTL_HANDLER_ARGS);
 #if defined(__i386__) || defined(__amd64__)
 static int	acpi_cpu_method_sysctl(SYSCTL_HANDLER_ARGS);
 #endif
@@ -389,6 +392,20 @@ acpi_cpu_attach(device_t dev)
 	    OID_AUTO, "cppc_notify", CTLFLAG_RDTUN | CTLFLAG_MPSAFE,
 	    &cppc_notify, 0, "Register for CPPC Notifications");
 #endif
+
+	/*
+	 * Disable entry to idle function during suspend.  This works
+	 * around chipsets where the CPU sleep registers return
+	 * immediately after the chipset has been powered down, but
+	 * prevents CPUs from reaching deep C-states needed for S0ix.
+	 */
+	cpu_disable_idle_on_suspend = false;
+	SYSCTL_ADD_PROC(&cpu_sysctl_ctx, SYSCTL_CHILDREN(cpu_sysctl_tree),
+	    OID_AUTO, "disable_idle_on_suspend",
+	    CTLTYPE_U8 | CTLFLAG_RWTUN | CTLFLAG_MPSAFE,
+	    NULL, 0, acpi_cpu_disable_idle_on_suspend_sysctl, "CU",
+	    "Disable idle C-states during suspend (workaround for certain "
+	    "chipsets, breaks S0ix)");
     }
 
     /*
@@ -531,19 +548,24 @@ is_idle_disabled(struct acpi_cpu_softc *sc)
 }
 #endif
 
-/*
- * Disable any entry to the idle function during suspend and re-enable it
- * during resume.
- */
 static int
 acpi_cpu_suspend(device_t dev)
 {
+    struct acpi_softc *acpi_sc;
     int error;
 
     error = bus_generic_suspend(dev);
     if (error)
 	return (error);
-    disable_idle(device_get_softc(dev));
+
+    if (cpu_disable_idle_on_suspend) {
+	acpi_sc = acpi_device_get_parent_softc(dev);
+	if (acpi_sc->acpi_stype == POWER_STYPE_SUSPEND_TO_IDLE)
+	    device_printf(dev, "WARNING: hw.acpi.cpu.disable_idle_on_suspend "
+		"is set, S0ix will likely not work\n");
+	disable_idle(device_get_softc(dev));
+    }
+
     return (0);
 }
 
@@ -551,7 +573,8 @@ static int
 acpi_cpu_resume(device_t dev)
 {
 
-    enable_idle(device_get_softc(dev));
+    if (cpu_disable_idle_on_suspend)
+	enable_idle(device_get_softc(dev));
     return (bus_generic_resume(dev));
 }
 
@@ -1616,4 +1639,32 @@ acpi_cpu_global_cx_lowest_sysctl(SYSCTL_HANDLER_ARGS)
     ACPI_SERIAL_END(cpu);
 
     return (0);
+}
+
+static int
+acpi_cpu_disable_idle_on_suspend_sysctl(SYSCTL_HANDLER_ARGS)
+{
+	struct acpi_cpu_softc *sc;
+	int error, i;
+
+	error = sysctl_handle_bool(oidp, &cpu_disable_idle_on_suspend, 0, req);
+	if (error != 0 || req->newptr == NULL)
+		return (error);
+
+	/*
+	 * If workaround disabled, re-enable idle on all CPUs now.  This avoids
+	 * the situation where idle was disabled while we set this sysctl.
+	 */
+	ACPI_SERIAL_BEGIN(cpu);
+	if (!cpu_disable_idle_on_suspend) {
+		CPU_FOREACH(i) {
+			if ((sc = cpu_softc[i]) == NULL)
+				continue;
+			if (sc->cpu_disable_idle)
+				enable_idle(sc);
+		}
+	}
+	ACPI_SERIAL_END(cpu);
+
+	return (0);
 }
