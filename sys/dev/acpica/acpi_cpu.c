@@ -528,27 +528,15 @@ is_idle_disabled(struct acpi_cpu_softc *sc)
 }
 #endif
 
-/*
- * Disable any entry to the idle function during suspend and re-enable it
- * during resume.
- */
 static int
 acpi_cpu_suspend(device_t dev)
 {
-    int error;
-
-    error = bus_generic_suspend(dev);
-    if (error)
-	return (error);
-    disable_idle(device_get_softc(dev));
-    return (0);
+    return (bus_generic_suspend(dev));
 }
 
 static int
 acpi_cpu_resume(device_t dev)
 {
-
-    enable_idle(device_get_softc(dev));
     return (bus_generic_resume(dev));
 }
 
