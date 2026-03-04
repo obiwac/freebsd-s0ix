@@ -3958,7 +3958,7 @@ acpi_wake_sleep_prep(struct acpi_softc *const sc, ACPI_HANDLE handle,
 	if (bootverbose)
 	    device_printf(dev, "wake_prep disabled wake for %s (%s)\n",
 		acpi_name(handle), power_stype_to_name(stype));
-    } else if (dev && (acpi_get_flags(dev) & ACPI_FLAG_WAKE_ENABLED) != 0) {
+    } else if (dev && acpi_has_flags(dev) && (acpi_get_flags(dev) & ACPI_FLAG_WAKE_ENABLED) != 0) {
 	acpi_pwr_wake_enable(handle, 1);
 	acpi_SetInteger(handle, "_PSW", 1);
 	if (bootverbose)
