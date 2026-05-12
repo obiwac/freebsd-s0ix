@@ -240,6 +240,15 @@ struct acpi_einj_error {
 #define	ACPIIO_EINJ_GET_VENDOR	_IOW('E', 2, struct acpi_einj_vendor_info)
 #define	ACPIIO_EINJ_SET_ERROR	_IOW('E', 3, struct acpi_einj_error)
 
+/* Power resource ioctls */
+struct acpi_pwr_get_d_state_arg {
+	char	path[256];	/* in: ACPI namespace path */
+	int	d_state;	/* out: D-state (ACPI_STATE_Dx or
+				   ACPI_STATE_UNKNOWN) */
+};
+
+#define	ACPIIO_PWR_GET_D_STATE	_IOR('R', 1, struct acpi_pwr_get_d_state_arg)
+
 #ifdef _KERNEL
 typedef int	(*acpi_ioctl_fn)(u_long cmd, caddr_t addr, void *arg);
 extern int	acpi_register_ioctl(u_long cmd, acpi_ioctl_fn fn, void *arg);
