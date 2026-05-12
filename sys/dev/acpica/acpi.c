@@ -720,6 +720,10 @@ acpi_attach(device_t dev)
     if ((error = acpi_machdep_init(dev)))
 	goto out;
 
+    /* Initialize power resource subsystem. */
+    if ((error = acpi_powerres_init()))
+	goto out;
+
     /*
      * Setup our sysctl tree.
      *

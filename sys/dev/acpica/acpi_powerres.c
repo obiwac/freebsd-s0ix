@@ -34,6 +34,7 @@
 #include <contrib/dev/acpica/include/acpi.h>
 #include <contrib/dev/acpica/include/accommon.h>
 
+#include <dev/acpica/acpiio.h>
 #include <dev/acpica/acpivar.h>
 
 /*
@@ -119,6 +120,59 @@ static struct acpi_powerresource
 			*acpi_pwr_find_resource(ACPI_HANDLE res);
 static struct acpi_powerconsumer
 			*acpi_pwr_find_consumer(ACPI_HANDLE consumer);
+
+static int
+acpi_powerres_ioctl(u_long cmd, caddr_t addr, void *arg)
+{
+	struct acpi_pwr_get_d_state_arg *get_d_state_arg;
+	struct acpi_powerconsumer *pc;
+	ACPI_STATUS status;
+	ACPI_HANDLE handle;
+	int err = ENXIO;
+
+	switch (cmd) {
+	case ACPIIO_PWR_GET_D_STATE:
+		get_d_state_arg = arg;
+		get_d_state_arg->path[sizeof(get_d_state_arg->path) - 1] = '\0';
+		status = AcpiGetHandle(ACPI_ROOT_OBJECT, get_d_state_arg->path,
+		    &handle);
+		if (ACPI_FAILURE(status)) {
+			err = ENOENT;
+			break;
+		}
+
+		ACPI_SERIAL_BEGIN(powerres);
+		pc = acpi_pwr_find_consumer(handle);
+		if (pc == NULL) {
+			err = ENOENT;
+			ACPI_SERIAL_END(powerres);
+			break;
+		}
+		get_d_state_arg->d_state = pc->ac_state; /* TODO */
+		ACPI_SERIAL_END(powerres);
+
+		err = 0;
+		break;
+	default:
+		err = EINVAL;
+	}
+
+	return (err);
+}
+
+int
+acpi_powerres_init(void)
+{
+	int err = 0;
+
+	ACPI_SERIAL_BEGIN(powerres);
+
+	err = acpi_register_ioctl(ACPIIO_PWR_GET_D_STATE, acpi_powerres_ioctl,
+	    NULL);
+
+	ACPI_SERIAL_END(powerres);
+	return (err);
+}
 
 /*
  * Register a power resource.
