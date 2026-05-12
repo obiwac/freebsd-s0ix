@@ -480,6 +480,7 @@ void		acpi_invoke_sleep_eventhandler(const enum power_stype *stype);
 void		acpi_invoke_wake_eventhandler(const enum power_stype *stype);
 
 /* Device power control. */
+int		acpi_powerres_init(void);
 ACPI_STATUS	acpi_pwr_wake_enable(ACPI_HANDLE consumer, int enable);
 ACPI_STATUS	acpi_pwr_switch_consumer(ACPI_HANDLE consumer, int state);
 acpi_pwr_for_sleep_t	acpi_device_pwr_for_sleep;

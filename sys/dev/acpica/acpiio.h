@@ -201,6 +201,15 @@ union acpi_battery_ioctl_arg {
 /* Get AC adapter status. */
 #define ACPIIO_ACAD_GET_STATUS	  _IOR('A', 1, int)
 
+/* Power resource ioctls */
+struct acpi_pwr_get_d_state_arg {
+	char	path[256];	/* in: ACPI namespace path */
+	int	d_state;	/* out: D-state (ACPI_STATE_Dx or
+				   ACPI_STATE_UNKNOWN) */
+};
+
+#define	ACPIIO_PWR_GET_D_STATE	_IOR('R', 1, struct acpi_pwr_get_d_state_arg)
+
 #ifdef _KERNEL
 typedef int	(*acpi_ioctl_fn)(u_long cmd, caddr_t addr, void *arg);
 extern int	acpi_register_ioctl(u_long cmd, acpi_ioctl_fn fn, void *arg);
