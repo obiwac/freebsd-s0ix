@@ -1,0 +1,197 @@
+.\" Copyright (c) 2026 Baptiste Daroussin <bapt@FreeBSD.org>
+.\"
+.\" SPDX-License-Identifier: BSD-2-Clause
+.\"
+.Dd April 30, 2026
+.Dt RCCTL 8
+.Os
+.Sh NAME
+.Nm rcctl
+.Nd control utility for rcd
+.Sh SYNOPSIS
+.Nm
+.Cm status
+.Op Ar service
+.Nm
+.Cm start | stop | restart | reload
+.Ar service ...
+.Nm
+.Cm enable | disable
+.Ar service ...
+.Nm
+.Cm delete
+.Ar service ...
+.Nm
+.Cm rcvar
+.Ar service
+.Nm
+.Cm show
+.Ar service
+.Nm
+.Cm resources
+.Ar service
+.Nm
+.Cm suspend | resume
+.Nm
+.Cm list
+.Nm
+.Ar command
+.Ar service
+.Sh DESCRIPTION
+.Nm
+communicates with
+.Xr rcd 8
+via its UNIX domain control socket to manage services.
+.Pp
+The following commands are available:
+.Bl -tag -width "resources"
+.It Cm status Op Ar service
+Show the state of all services, or a specific service.
+.Pp
+The status display distinguishes between different reasons a service
+is not running:
+.Bl -tag -width "disabled" -compact
+.It Cm nojail
+Service is filtered by jail context
+.Pq not applicable in the current jail environment .
+.It Cm disabled
+Service is disabled by the administrator
+.Pq via Va rcvar No or Cm rcctl disable .
+.El
+.It Cm start Ar service ...
+Start one or more services.
+For template instances, use the
+.Ar template Ns @ Ns Ar instance
+syntax.
+.It Cm stop Ar service ...
+Stop one or more services.
+.It Cm restart Ar service ...
+Stop then start one or more services.
+.It Cm reload Ar service ...
+Send the reload signal (default SIGHUP) to running services.
+.It Cm enable Ar service ...
+Mark services to start on boot.
+Persisted in
+.Pa /etc/rcd.conf.d/ .
+.It Cm disable Ar service ...
+Mark services to not start on boot.
+.It Cm delete Ar service ...
+Remove the override file for one or more services, resetting
+them to unit file defaults.
+The service is re-enabled since the default is
+.Cm enable = true .
+.It Cm rcvar Ar service
+Show the enabled state, unit type, unit file path, and
+override file path (if present) for a service.
+Useful for debugging service configuration.
+.It Cm show Ar service
+Display the full effective configuration of a service in UCL format,
+including unit file settings, overrides, and runtime state.
+.It Cm resources Ar service
+Show resource usage via
+.Xr rctl 8
+for a running service.
+.It Cm suspend
+Stop all services with the
+.Cm resume
+keyword (for power suspend).
+.It Cm resume
+Restart all services with the
+.Cm resume
+keyword (after power resume).
+.It Cm list
+List all known services.
+.It Ar command Ar service
+Run a custom command defined in the service's
+.Cm commands
+block.
+.El
+.Sh TEMPLATE INSTANCES
+Services defined as templates support per-instance operation:
+.Bd -literal -offset indent
+rcctl start dhclient@em0
+rcctl stop bluetooth@ubt0
+rcctl restart geli@ada0p4 geli@ada1p4
+.Ed
+.Pp
+Template instances are configured in
+.Pa /etc/rcd.conf.d/<template> :
+.Bd -literal -offset indent
+instances {
+    em0 {}
+    wlan0 {}
+}
+.Ed
+.Pp
+Or as a simple array when no per-instance config is needed:
+.Bd -literal -offset indent
+instances ["em0", "wlan0"];
+.Ed
+.Ss Instance Grouping
+When multiple instances of the same template appear consecutively on
+the command line,
+.Nm
+groups them into a single request.
+For legacy
+.Xr rc.d 8
+scripts, this results in a single invocation with all instance names
+as arguments, matching the traditional calling convention:
+.Bd -literal -offset indent
+rcctl restart netif@em0 netif@em1
+.Ed
+.Pp
+This is equivalent to:
+.Bd -literal -offset indent
+/bin/sh /etc/rc.d/netif restart em0 em1
+.Ed
+.Pp
+Instances of different templates, or non-template services interspersed
+between instances, break the grouping:
+.Bd -literal -offset indent
+# Two separate calls (different templates):
+rcctl restart netif@em0 jail@web
+
+# Three calls (sshd breaks the group):
+rcctl restart netif@em0 sshd netif@em1
+.Ed
+.Sh EXAMPLES
+.Bd -literal
+# Show all services
+rcctl status
+
+# Start and enable sshd
+rcctl start sshd
+rcctl enable sshd
+
+# Show effective config
+rcctl show sshd
+
+# Show enabled state and unit file location
+rcctl rcvar sshd
+
+# Restart multiple services
+rcctl restart nginx sshd
+
+# Start a template instance
+rcctl start dhclient@em0
+
+# Restart multiple interfaces (grouped into one script call)
+rcctl restart netif@em0 netif@em1
+
+# Run a custom command
+rcctl configtest sshd
+rcctl rotate_log accounting
+
+# Remove override and reset to defaults
+rcctl delete nginx
+
+# Suspend/resume for power management
+rcctl suspend
+rcctl resume
+.Ed
+.Sh SEE ALSO
+.Xr rcd 8 ,
+.Xr rcd.conf 5 ,
+.Xr rcd.d 5
+.Sh AUTHORS
+.An Baptiste Daroussin Aq Mt bapt@FreeBSD.org

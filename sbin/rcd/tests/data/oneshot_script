@@ -1,0 +1,15 @@
+#!/bin/sh
+#
+# PROVIDE: test_oneshot
+# REQUIRE: FILESYSTEMS
+
+. /etc/rc.subr
+name="test_oneshot"
+start_cmd="test_oneshot_start"
+
+test_oneshot_start() {
+    echo "done"
+}
+
+load_rc_config $name
+run_rc_command "$1"

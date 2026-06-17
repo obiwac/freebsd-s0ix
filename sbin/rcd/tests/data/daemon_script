@@ -1,0 +1,14 @@
+#!/bin/sh
+#
+# PROVIDE: test_daemon
+# REQUIRE: DAEMON
+# KEYWORD: shutdown
+
+. /etc/rc.subr
+name="test_daemon"
+rcvar="test_daemon_enable"
+command="/usr/sbin/test_daemon"
+pidfile="/var/run/test_daemon.pid"
+
+load_rc_config $name
+run_rc_command "$1"

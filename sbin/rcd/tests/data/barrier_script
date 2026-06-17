@@ -1,0 +1,6 @@
+#!/bin/sh
+#
+# PROVIDE: TEST_BARRIER
+# REQUIRE: something
+#
+# This is a dummy barrier

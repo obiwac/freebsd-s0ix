@@ -1,0 +1,389 @@
+{
+  "title": "rcd unit file",
+  "description": "Service unit definition for rcd(8), the FreeBSD service manager",
+  "type": "object",
+  "properties": {
+    "name": {
+      "description": "Service name (must match [a-zA-Z0-9][a-zA-Z0-9._-]*)",
+      "$ref": "#/$defs/service_name"
+    },
+    "description": {
+      "description": "Human-readable description of the service",
+      "type": "string"
+    },
+    "enable": {
+      "description": "Enabled state (default: false). Services must be explicitly enabled via the unit file or rcctl enable.",
+      "type": "boolean",
+      "default": false
+    },
+    "template": {
+      "description": "Mark this unit as a template. Instances are created via service@instance.",
+      "type": "boolean",
+      "default": false
+    },
+    "type": {
+      "description": "Service type",
+      "type": "string",
+      "enum": ["simple", "forking", "oneshot", "barrier"],
+      "default": "simple"
+    },
+    "command": {
+      "description": "Full path to the service executable",
+      "type": "string"
+    },
+    "command_args": {
+      "description": "Arguments passed to the command",
+      "type": "string"
+    },
+    "command_prepend": {
+      "description": "Command prepended before the service binary (e.g. strace, valgrind)",
+      "type": "string"
+    },
+    "exec": {
+      "description": "Inline exec for oneshots. Prefix with 'lua:' for Lua, otherwise shell. Replaces command for script-driven oneshots.",
+      "type": "string"
+    },
+    "stop_command": {
+      "description": "Custom stop command (if different from sending sig_stop). Prefix with 'lua:' for Lua.",
+      "type": "string"
+    },
+    "off_command": {
+      "description": "Command executed at boot when the service is disabled. Used for cleanup or state-setting.",
+      "type": "string"
+    },
+    "start_delay": {
+      "description": "Delay in milliseconds before starting the service (0 = none)",
+      "type": "integer",
+      "minimum": 0,
+      "default": 0
+    },
+    "sig_stop": {
+      "description": "Signal for stop: integer (1-31) or name (e.g. \"SIGTERM\", \"TERM\"). Default: SIGTERM (15).",
+      "oneOf": [
+        { "type": "integer", "minimum": 1, "maximum": 31 },
+        { "type": "string" }
+      ],
+      "default": 15
+    },
+    "sig_reload": {
+      "description": "Signal for reload: integer (1-31) or name (e.g. \"SIGHUP\", \"HUP\"). Default: SIGHUP (1).",
+      "oneOf": [
+        { "type": "integer", "minimum": 1, "maximum": 31 },
+        { "type": "string" }
+      ],
+      "default": 1
+    },
+    "provides": {
+      "description": "Names this service provides (for dependency resolution)",
+      "type": "array",
+      "items": { "$ref": "#/$defs/service_name" },
+      "minItems": 1
+    },
+    "requires": {
+      "description": "Names this service requires before starting",
+      "type": "array",
+      "items": { "$ref": "#/$defs/service_name" }
+    },
+    "before": {
+      "description": "Names that this service must start before",
+      "type": "array",
+      "items": { "$ref": "#/$defs/service_name" }
+    },
+    "keywords": {
+      "description": "Filtering keywords",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["nojail", "nojailvnet", "nostart", "firstboot", "resume"]
+      }
+    },
+    "required_dirs": {
+      "description": "Directories that must exist before starting",
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "required_files": {
+      "description": "Files that must be readable before starting",
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "required_modules": {
+      "description": "Kernel modules to load before starting (via kldload)",
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "required_vars": {
+      "description": "Config variable names that must be set in the override file before the service can start",
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "required_sysctl": {
+      "description": "Sysctl values that must match before starting. Keys are sysctl names, values are expected string values.",
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "setup_cmd": {
+      "description": "Command run before start_precmd on start, restart, and reload",
+      "type": "string"
+    },
+    "start_precmd": {
+      "description": "Shell command to run before starting the service",
+      "type": "string"
+    },
+    "start_postcmd": {
+      "description": "Shell command to run after starting the service",
+      "type": "string"
+    },
+    "stop_precmd": {
+      "description": "Shell command to run before stopping the service",
+      "type": "string"
+    },
+    "stop_postcmd": {
+      "description": "Shell command to run after stopping the service",
+      "type": "string"
+    },
+    "commands": {
+      "description": "Custom commands (name -> exec code). Prefix value with 'lua:' for Lua, otherwise shell.",
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "ready": {
+      "description": "Readiness notification method",
+      "type": "object",
+      "properties": {
+        "method": {
+          "type": "string",
+          "enum": ["immediate", "fd", "exit", "socket"],
+          "default": "immediate"
+        }
+      },
+      "additionalProperties": false
+    },
+    "access": {
+      "$ref": "#/$defs/access"
+    },
+    "socket": {
+      "description": "Socket activation definitions (keyed by socket name)",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/socket"
+      }
+    },
+    "process": {
+      "$ref": "#/$defs/process"
+    },
+    "restart": {
+      "$ref": "#/$defs/restart"
+    },
+    "rctl": {
+      "description": "Resource control rules (keyed by resource name)",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/rctl_rule"
+      }
+    },
+    "jail": {
+      "$ref": "#/$defs/jail"
+    },
+    "environment": {
+      "description": "Environment variables for the service",
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "logging": {
+      "$ref": "#/$defs/logging"
+    }
+  },
+  "required": ["name", "provides"],
+  "additionalProperties": false,
+  "$defs": {
+    "service_name": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9_][a-zA-Z0-9_.-]*$"
+    },
+    "principal_list": {
+      "type": "array",
+      "description": "List of principals: 'username' or '@groupname'",
+      "items": {
+        "type": "string",
+        "pattern": "^@?[a-zA-Z0-9_.-]+$"
+      }
+    },
+    "access": {
+      "type": "object",
+      "description": "Per-service access control. Principals are user names or @group names.",
+      "properties": {
+        "start":   { "$ref": "#/$defs/principal_list" },
+        "stop":    { "$ref": "#/$defs/principal_list" },
+        "restart": { "$ref": "#/$defs/principal_list" },
+        "reload":  { "$ref": "#/$defs/principal_list" },
+        "status":  { "$ref": "#/$defs/principal_list" }
+      },
+      "additionalProperties": false
+    },
+    "socket": {
+      "type": "object",
+      "description": "Socket activation definition",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["stream", "dgram", "seqpacket"],
+          "default": "stream"
+        },
+        "listen": {
+          "description": "Listen address: tcp:addr:port, tcp6:[addr]:port, udp:addr:port, udp6:[addr]:port, unix:/path. IPv6 addresses must be enclosed in square brackets.",
+          "type": "string",
+          "pattern": "^(tcp6?|udp6?|unix):.*$"
+        },
+        "backlog": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 128
+        },
+        "permissions": {
+          "oneOf": [
+            { "type": "integer", "minimum": 0, "maximum": 511 },
+            { "type": "string" }
+          ],
+          "default": 438
+        },
+        "owner": { "type": "string" },
+        "group": { "type": "string" }
+      },
+      "required": ["listen"],
+      "additionalProperties": false
+    },
+    "process": {
+      "type": "object",
+      "description": "Process execution parameters",
+      "properties": {
+        "user": { "type": "string" },
+        "group": { "type": "string" },
+        "groups": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "chdir": { "type": "string" },
+        "chroot": { "type": "string" },
+        "umask": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 511,
+          "default": 18
+        },
+        "nice": {
+          "type": "integer",
+          "minimum": -20,
+          "maximum": 20,
+          "default": 0
+        },
+        "cpuset": {
+          "type": "string",
+          "pattern": "^[0-9][-0-9,]*$"
+        },
+        "fib": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0
+        },
+        "login_class": { "type": "string" },
+        "limits": { "type": "string" },
+        "env_file": { "type": "string" },
+        "oom_protect": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "restart": {
+      "type": "object",
+      "description": "Restart policy configuration",
+      "properties": {
+        "policy": {
+          "type": "string",
+          "enum": ["never", "on-failure", "always"],
+          "default": "never"
+        },
+        "max_retries": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 5
+        },
+        "delay": {
+          "description": "Delay in milliseconds between restart attempts",
+          "type": "integer",
+          "minimum": 0,
+          "default": 5000
+        },
+        "backoff": {
+          "type": "string",
+          "enum": ["none", "linear", "exponential"],
+          "default": "none"
+        },
+        "reset": {
+          "description": "Time in milliseconds after which the retry counter resets",
+          "type": "integer",
+          "minimum": 0,
+          "default": 60000
+        }
+      },
+      "additionalProperties": false
+    },
+    "rctl_rule": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": ["deny", "log", "devctl", "throttle",
+                   "sigterm", "sigkill", "sighup"]
+        },
+        "amount": { "type": "string" }
+      },
+      "required": ["action", "amount"],
+      "additionalProperties": false
+    },
+    "jail": {
+      "type": "object",
+      "properties": {
+        "enable": { "type": "boolean", "default": false },
+        "name": {
+          "$ref": "#/$defs/service_name"
+        },
+        "path": { "type": "string", "default": "/" },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["netv4", "netv6", "mlock", "sysvipc",
+                     "allow.routing", "vmm"]
+          }
+        },
+        "ip4addr": {
+          "type": "array",
+          "items": { "type": "string", "format": "ipv4" }
+        },
+        "ip6addr": {
+          "type": "array",
+          "items": { "type": "string", "format": "ipv6" }
+        },
+        "devfs": { "type": "boolean", "default": false }
+      },
+      "additionalProperties": false
+    },
+    "logging": {
+      "type": "object",
+      "properties": {
+        "stdout": {
+          "type": "string",
+          "pattern": "^(syslog:[a-z0-9]+\\.[a-z]+|file:/.+|null)$"
+        },
+        "stderr": {
+          "type": "string",
+          "pattern": "^(syslog:[a-z0-9]+\\.[a-z]+|file:/.+|null)$"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

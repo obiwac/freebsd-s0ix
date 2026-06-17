@@ -1,0 +1,5 @@
+name = "reqvars_test";
+type = "simple";
+command = "/usr/bin/test";
+required_vars = ["api_key", "db_host"];
+provides = ["reqvars_test"];

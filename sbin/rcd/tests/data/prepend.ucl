@@ -1,0 +1,5 @@
+name = "prepend_test";
+type = "simple";
+command = "/usr/bin/test";
+command_prepend = "/usr/bin/strace";
+provides = ["prepend_test"];

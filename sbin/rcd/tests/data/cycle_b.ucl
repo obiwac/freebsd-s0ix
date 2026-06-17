@@ -1,0 +1,7 @@
+name = "cycle_b";
+description = "Cycle test B";
+type = "oneshot";
+command = "/bin/true";
+
+provides = ["cycle_b"];
+requires = ["cycle_a"];

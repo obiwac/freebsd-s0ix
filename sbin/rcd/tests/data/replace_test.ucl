@@ -1,0 +1,7 @@
+name = "replace_test";
+type = "simple";
+command = "/usr/bin/test";
+
+provides = ["replace_test"];
+requires = ["A", "B", "C"];
+keywords = ["nojail", "nostart"];

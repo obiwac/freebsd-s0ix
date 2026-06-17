@@ -1,0 +1,5 @@
+name = "offcmd_test";
+type = "simple";
+command = "/usr/bin/test";
+off_command = "/usr/bin/cleanup";
+provides = ["offcmd_test"];

@@ -1,0 +1,7 @@
+#!/bin/sh
+#
+# PROVIDE: norcd_test
+# REQUIRE:
+# KEYWORD: NORCD
+
+echo "this should never run under rcd"

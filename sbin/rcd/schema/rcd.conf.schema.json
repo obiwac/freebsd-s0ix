@@ -1,0 +1,60 @@
+{
+  "title": "rcd.conf",
+  "description": "Global configuration for rcd(8), the FreeBSD service manager",
+  "type": "object",
+  "properties": {
+    "parallel": {
+      "description": "Enable parallel service startup",
+      "type": "boolean",
+      "default": true
+    },
+    "max_parallel": {
+      "description": "Maximum number of services starting concurrently (0 = unlimited)",
+      "type": "integer",
+      "minimum": 0,
+      "default": 0
+    },
+    "control_socket": {
+      "description": "Path to the control UNIX socket",
+      "type": "string",
+      "default": "/var/run/rcd.sock"
+    },
+    "control_permissions": {
+      "description": "Permissions on the control socket. Accepts integer (0660), octal string (\"0660\"), or symbolic (\"rw-rw----\", \"u=rw,g=rw\")",
+      "oneOf": [
+        { "type": "integer", "minimum": 0, "maximum": 511 },
+        { "type": "string" }
+      ],
+      "default": 432
+    },
+    "control_group": {
+      "description": "Group allowed to connect to the control socket",
+      "type": "string",
+      "default": "wheel"
+    },
+    "log_level": {
+      "description": "Logging verbosity",
+      "type": "string",
+      "enum": ["debug", "info", "warning", "error"],
+      "default": "info"
+    },
+    "stop_timeout_ms": {
+      "description": "Per-service stop timeout in milliseconds before SIGKILL",
+      "type": "integer",
+      "minimum": 0,
+      "default": 10000
+    },
+    "shutdown_timeout_ms": {
+      "description": "Global shutdown watchdog timeout in milliseconds",
+      "type": "integer",
+      "minimum": 0,
+      "default": 90000
+    },
+    "firstboot_sentinel": {
+      "description": "Path to the firstboot sentinel file",
+      "type": "string",
+      "default": "/firstboot"
+    }
+  },
+  "additionalProperties": false
+}

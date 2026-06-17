@@ -1,0 +1,216 @@
+{
+  "title": "rcd override file",
+  "description": "Per-service override for rcd(8). Placed in /etc/rcd.conf.d/<service>. Scalar fields replace the unit value. Array fields are appended (duplicates skipped). Use remove{} to delete entries, replace{} to replace arrays entirely.",
+  "type": "object",
+  "properties": {
+    "enable": {
+      "description": "Override enabled state",
+      "type": "boolean"
+    },
+    "description": {
+      "description": "Override service description",
+      "type": "string"
+    },
+    "command": {
+      "description": "Override service executable path",
+      "type": "string"
+    },
+    "command_args": {
+      "description": "Override command arguments",
+      "type": "string"
+    },
+    "command_prepend": {
+      "description": "Override command prepend (e.g. strace, valgrind)",
+      "type": "string"
+    },
+    "exec": {
+      "description": "Override inline exec for oneshots",
+      "type": "string"
+    },
+    "stop_command": {
+      "description": "Override custom stop command",
+      "type": "string"
+    },
+    "off_command": {
+      "description": "Override off-command (run at boot when disabled)",
+      "type": "string"
+    },
+    "sig_stop": {
+      "description": "Override stop signal",
+      "oneOf": [
+        { "type": "integer", "minimum": 1, "maximum": 31 },
+        { "type": "string" }
+      ]
+    },
+    "sig_reload": {
+      "description": "Override reload signal",
+      "oneOf": [
+        { "type": "integer", "minimum": 1, "maximum": 31 },
+        { "type": "string" }
+      ]
+    },
+    "start_delay": {
+      "description": "Override start delay in milliseconds",
+      "type": "integer",
+      "minimum": 0
+    },
+    "setup_cmd": { "type": "string" },
+    "start_precmd": { "type": "string" },
+    "start_postcmd": { "type": "string" },
+    "stop_precmd": { "type": "string" },
+    "stop_postcmd": { "type": "string" },
+    "provides": {
+      "description": "Provision names to append",
+      "type": "array",
+      "items": { "$ref": "#/$defs/service_name" }
+    },
+    "requires": {
+      "description": "Dependency names to append",
+      "type": "array",
+      "items": { "$ref": "#/$defs/service_name" }
+    },
+    "before": {
+      "description": "Before names to append",
+      "type": "array",
+      "items": { "$ref": "#/$defs/service_name" }
+    },
+    "keywords": {
+      "description": "Keywords to append",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["nojail", "nojailvnet", "nostart", "firstboot", "resume"]
+      }
+    },
+    "required_dirs": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "required_files": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "required_modules": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "required_vars": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "restart": {
+      "$ref": "#/$defs/restart"
+    },
+    "process": {
+      "$ref": "#/$defs/process"
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "jail": {
+      "$ref": "#/$defs/jail"
+    },
+    "logging": {
+      "$ref": "#/$defs/logging"
+    },
+    "access": {
+      "$ref": "#/$defs/access"
+    },
+    "remove": {
+      "description": "Remove specific entries from arrays. Each key is an array field name, each value is an array of entries to remove.",
+      "$ref": "#/$defs/array_fields"
+    },
+    "replace": {
+      "description": "Replace arrays entirely. Each key is an array field name, each value is the new array.",
+      "$ref": "#/$defs/array_fields"
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "service_name": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9_][a-zA-Z0-9_.-]*$"
+    },
+    "array_fields": {
+      "type": "object",
+      "properties": {
+        "provides": { "type": "array", "items": { "type": "string" } },
+        "requires": { "type": "array", "items": { "type": "string" } },
+        "before": { "type": "array", "items": { "type": "string" } },
+        "keywords": { "type": "array", "items": { "type": "string" } },
+        "required_dirs": { "type": "array", "items": { "type": "string" } },
+        "required_files": { "type": "array", "items": { "type": "string" } },
+        "required_modules": { "type": "array", "items": { "type": "string" } },
+        "required_vars": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "principal_list": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^@?[a-zA-Z0-9_.-]+$" }
+    },
+    "access": {
+      "type": "object",
+      "properties": {
+        "start":   { "$ref": "#/$defs/principal_list" },
+        "stop":    { "$ref": "#/$defs/principal_list" },
+        "restart": { "$ref": "#/$defs/principal_list" },
+        "reload":  { "$ref": "#/$defs/principal_list" },
+        "status":  { "$ref": "#/$defs/principal_list" }
+      },
+      "additionalProperties": false
+    },
+    "restart": {
+      "type": "object",
+      "properties": {
+        "policy": { "type": "string", "enum": ["never", "on-failure", "always"] },
+        "max_retries": { "type": "integer", "minimum": 0 },
+        "delay": { "type": "integer", "minimum": 0 },
+        "backoff": { "type": "string", "enum": ["none", "linear", "exponential"] },
+        "reset": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "process": {
+      "type": "object",
+      "properties": {
+        "user": { "type": "string" },
+        "group": { "type": "string" },
+        "groups": { "type": "array", "items": { "type": "string" } },
+        "chdir": { "type": "string" },
+        "chroot": { "type": "string" },
+        "umask": { "type": "integer", "minimum": 0, "maximum": 511 },
+        "nice": { "type": "integer", "minimum": -20, "maximum": 20 },
+        "cpuset": { "type": "string" },
+        "fib": { "type": "integer", "minimum": 0 },
+        "login_class": { "type": "string" },
+        "limits": { "type": "string" },
+        "env_file": { "type": "string" },
+        "oom_protect": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "jail": {
+      "type": "object",
+      "properties": {
+        "enable": { "type": "boolean" },
+        "name": { "type": "string" },
+        "path": { "type": "string" },
+        "options": { "type": "array", "items": { "type": "string" } },
+        "ip4addr": { "type": "array", "items": { "type": "string" } },
+        "ip6addr": { "type": "array", "items": { "type": "string" } },
+        "devfs": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "logging": {
+      "type": "object",
+      "properties": {
+        "stdout": { "type": "string" },
+        "stderr": { "type": "string" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

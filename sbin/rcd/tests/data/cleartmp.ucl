@@ -1,0 +1,10 @@
+name = "cleartmp";
+description = "Clear /tmp at boot";
+type = "oneshot";
+
+provides = ["cleartmp"];
+requires = ["mountcritlocal"];
+before = ["FILESYSTEMS"];
+
+command = "/bin/sh";
+command_args = "-c 'rm -rf /tmp/*'";

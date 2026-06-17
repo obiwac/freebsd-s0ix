@@ -1,0 +1,179 @@
+# rcd(8) test utility functions
+#
+# Creates lightweight jails.
+# Uses nullfs to share the host filesystem read-only, with tmpfs
+# overlays for test-specific directories (rcd.d, rc.d, rcd.conf.d).
+#
+# Pattern:
+#   rcd_init          — check prerequisites
+#   rcd_mkjail name   — create a jail with clean rcd directories
+#   rcd_start name    — start rcd inside the jail
+#   rcd_wait name     — wait for the control socket
+#   rcd_cleanup       — stop rcd, destroy jails, unmount
+
+rcd_init()
+{
+	if [ "$(id -u)" -ne 0 ]; then
+		atf_skip "requires root"
+	fi
+	if [ ! -x /sbin/rcd ]; then
+		atf_skip "rcd not installed"
+	fi
+	if [ ! -x /sbin/rcctl ]; then
+		atf_skip "rcctl not installed"
+	fi
+	if ! jail -c name="rcd_probe_$$" persist path=/ \
+	    exec.start="" exec.stop="" 2>/dev/null; then
+		atf_skip "cannot create jails"
+	fi
+	if ! jexec "rcd_probe_$$" /usr/bin/true 2>/dev/null; then
+		jail -r "rcd_probe_$$" 2>/dev/null
+		atf_skip "jexec not permitted"
+	fi
+	jail -r "rcd_probe_$$" 2>/dev/null
+}
+
+# rcd_mkjail name
+#   Creates a jail with the host filesystem shared read-only via nullfs.
+#   Test-writable directories are overlaid with tmpfs:
+#     /etc/rcd.d/       — native unit files (empty, test populates)
+#     /etc/rc.d/        — legacy scripts (empty, test populates)
+#     /etc/rcd.conf.d/  — override files (empty, test populates)
+#     /var/run/         — runtime (control socket, pidfiles)
+#     /var/tmp/         — scratch
+rcd_mkjail()
+{
+	_jname="$1"
+	_root="/var/tmp/rcd_jail_${_jname}.$$"
+
+	mkdir -p "$_root"
+
+	# Create directories that may not exist on the host BEFORE nullfs
+	mkdir -p /etc/rcd.d /etc/rcd.conf.d 2>/dev/null || true
+
+	mount -t nullfs -o ro / "$_root"
+
+	# Writable overlays — these directories already exist from the
+	# nullfs mount of the host filesystem.  Mounting tmpfs on top
+	# hides the host content and gives us a clean writable layer.
+	for _d in etc/rcd.d etc/rc.d etc/rcd.conf.d var/run var/tmp; do
+		mount -t tmpfs tmpfs "$_root/$_d"
+	done
+
+	# devfs for /dev/null etc.
+	mount -t devfs devfs "$_root/dev"
+
+	# Hide host rc.conf.d fragments
+	mount -t tmpfs tmpfs "$_root/etc/rc.conf.d"
+
+	jail -c name="${_jname}" \
+	    host.hostname="${_jname}" \
+	    path="$_root" \
+	    persist \
+	    exec.start="" \
+	    exec.stop="" \
+	    allow.raw_sockets
+
+	# Persist jail info to files so cleanup works across processes
+	echo "${_jname}" >> created_jails.lst
+	echo "${_root}" >> created_roots.lst
+}
+
+# rcd_add_unit jail_name filename
+#   Write a native .ucl unit file into the jail's /etc/rcd.d/.
+#   Content is read from stdin.
+rcd_add_unit()
+{
+	_jname="$1"
+	_fname="$2"
+	_root="/var/tmp/rcd_jail_${_jname}.$$"
+
+	cat > "$_root/etc/rcd.d/${_fname}"
+}
+
+# rcd_add_legacy jail_name filename
+#   Write a legacy rc.d script into the jail's /etc/rc.d/.
+#   Content is read from stdin.  Marked executable.
+rcd_add_legacy()
+{
+	_jname="$1"
+	_fname="$2"
+	_root="/var/tmp/rcd_jail_${_jname}.$$"
+
+	cat > "$_root/etc/rc.d/${_fname}"
+	chmod 755 "$_root/etc/rc.d/${_fname}"
+}
+
+# rcd_add_override jail_name service_name
+#   Write an override file into the jail's /etc/rcd.conf.d/.
+#   Content is read from stdin.
+rcd_add_override()
+{
+	_jname="$1"
+	_sname="$2"
+	_root="/var/tmp/rcd_jail_${_jname}.$$"
+
+	cat > "$_root/etc/rcd.conf.d/${_sname}"
+}
+
+# rcd_start jail_name
+#   Start rcd inside the jail in background.
+rcd_start()
+{
+	_jname="$1"
+
+	jexec "${_jname}" /sbin/rcd &
+}
+
+# rcd_wait jail_name [timeout_secs]
+#   Wait for rcd's control socket to appear.
+rcd_wait()
+{
+	_jname="$1"
+	_timeout="${2:-30}"
+	_root="/var/tmp/rcd_jail_${_jname}.$$"
+	_i=0
+
+	while [ "$_i" -lt "$((_timeout * 2))" ]; do
+		if [ -S "$_root/var/run/rcd.sock" ]; then
+			return 0
+		fi
+		sleep 0.5
+		_i=$((_i + 1))
+	done
+	atf_fail "rcd did not boot within ${_timeout} seconds"
+}
+
+rcd_cleanup()
+{
+	# Stop rcd in each jail, then destroy
+	if [ -f created_jails.lst ]; then
+		while read _jname; do
+			_pid=$(jexec "${_jname}" ps -axo pid,comm 2>/dev/null | \
+			    awk '/rcd$/{print $1; exit}')
+			if [ -n "$_pid" ]; then
+				jexec "${_jname}" kill "$_pid" 2>/dev/null
+				sleep 1
+			fi
+			jail -r "${_jname}" 2>/dev/null
+		done < created_jails.lst
+		rm -f created_jails.lst
+	fi
+
+	# Unmount and remove jail roots
+	if [ -f created_roots.lst ]; then
+		while read _root; do
+			if [ -d "$_root" ]; then
+				umount "$_root/etc/rc.conf.d" 2>/dev/null
+				umount "$_root/dev" 2>/dev/null
+				for _d in var/tmp var/run etc/rcd.conf.d \
+				    etc/rc.d etc/rcd.d; do
+					umount "$_root/$_d" 2>/dev/null
+				done
+				umount "$_root" 2>/dev/null
+				rmdir "$_root" 2>/dev/null
+			fi
+		done < created_roots.lst
+		rm -f created_roots.lst
+	fi
+}

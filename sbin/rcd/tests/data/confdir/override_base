@@ -1,0 +1,22 @@
+# Test override: append deps, replace scalar, add keyword, merge restart.
+
+# Scalars: replace
+command = "/usr/local/bin/overridden";
+sig_stop = "SIGUSR1";
+start_delay = 500;
+start_precmd = "/usr/bin/precheck";
+
+# Arrays: append (deduplicated)
+requires = ["FILESYSTEMS", "NETWORKING"];
+before = ["DAEMON"];
+keywords = ["resume"];
+
+# Objects: merge
+restart {
+    delay = 5000;
+}
+
+# Remove block
+remove {
+    provides = ["base_alias"];
+}

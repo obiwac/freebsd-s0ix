@@ -1,0 +1,333 @@
+.\" Copyright (c) 2026 Baptiste Daroussin <bapt@FreeBSD.org>
+.\"
+.\" SPDX-License-Identifier: BSD-2-Clause
+.\"
+.Dd April 30, 2026
+.Dt RCD 8
+.Os
+.Sh NAME
+.Nm rcd
+.Nd FreeBSD service manager
+.Sh SYNOPSIS
+.Nm
+.Op Fl v
+.Sh DESCRIPTION
+.Nm
+is a service manager daemon.
+It reads service definitions from UCL unit files, builds a dependency
+graph, and starts services in parallel.
+After boot completes, it remains running as a supervisor daemon,
+automatically restarting failed services and accepting control commands
+via a UNIX domain socket.
+.Pp
+.Nm
+is called by
+.Xr init 8 .
+When all boot services have started, it forks to background
+.Pq the parent exits, signaling init to proceed to multi-user mode
+and continues as the supervision daemon.
+.Pp
+During boot,
+.Nm
+prints progress messages to the system console
+.Pa /dev/console :
+starting service names as they are launched, warnings for services
+that fail to start, and a final
+.Dq Boot complete.
+message.
+Console output can be suppressed by setting
+.Cm quiet_boot
+to
+.Cm true
+in
+.Xr rcd.conf 5 .
+.Pp
+The following features are provided:
+.Bl -bullet -compact
+.It
+Parallel service startup via dependency DAG
+.It
+Process tracking via
+.Xr pdfork 2
+process descriptors (no PID files)
+.It
+Subreaper via
+.Xr procctl 2
+(no process escape)
+.It
+Socket activation (pre-bound sockets passed to services)
+.It
+Resource control via
+.Xr rctl 8
+.It
+Service isolation via
+.Xr jail 2
+.It
+OOM protection via
+.Xr procctl 2
+PROC_SPROTECT
+.It
+Automatic restart with configurable backoff
+.It
+Embedded Lua interpreter for service hooks
+.It
+Template units for per-instance services
+.It
+Per-service access control
+.It
+Suspend/resume support
+.It
+Safe in-place binary upgrade via
+.Dv SIGUSR1
+.It
+JSON Schema validation of unit files
+.It
+Full backward compatibility with legacy
+.Xr rc.d 8
+scripts
+.El
+.Sh OPTIONS
+.Bl -tag -width indent
+.It Fl v
+Verbose mode.
+Duplicates syslog messages to stderr, which is useful for debugging
+in jails where
+.Xr jail 8
+.Va exec.consolelog
+captures stderr output.
+.El
+.Sh UNIT FILES
+Service definitions are UCL files stored in:
+.Bl -bullet -compact
+.It
+.Pa /etc/rcd.d/
+\(em system units
+.It
+.Pa <localbase>/etc/rcd.d/
+\(em local/ports units
+.El
+.Pp
+See
+.Xr rcd.d 5
+for the unit file format.
+.Sh CONFIGURATION
+Global configuration is read from
+.Pa /etc/rcd.conf .
+Per-service overrides and template instances are in
+.Pa /etc/rcd.conf.d/<service> .
+.Pp
+See
+.Xr rcd.conf 5
+for details.
+.Sh CONTROL
+.Nm
+listens on
+.Pa /var/run/rcd.sock
+for commands from
+.Xr rcctl 8 .
+Client credentials are verified via
+.Dv LOCAL_PEERCRED .
+.Sh LEGACY COMPATIBILITY
+.Nm
+scans
+.Pa /etc/rc.d/
+and
+.Pa <localbase>/etc/rc.d/
+for legacy
+.Xr rc.d 8
+scripts.
+These are wrapped as virtual units in the dependency graph.
+Native UCL units take precedence over legacy scripts with the same
+.Cm provide
+name.
+.Pp
+For legacy scripts, all commands from
+.Xr rcctl 8
+are passed directly to the script as arguments:
+.Bd -literal -offset indent
+rcctl reload sshd    \(->  /bin/sh /etc/rc.d/sshd reload
+rcctl status ntpd    \(->  /bin/sh /etc/rc.d/ntpd status
+.Ed
+.Pp
+This includes custom commands declared in the script via
+.Va extra_commands .
+Only
+.Cm enable , disable , show ,
+and
+.Cm describe
+are handled by
+.Nm
+itself.
+.Pp
+When template instances of a legacy script are grouped on the
+.Xr rcctl 8
+command line, all instance names are passed as trailing arguments
+in a single invocation:
+.Bd -literal -offset indent
+rcctl restart netif@em0 netif@em1
+    \(->  /bin/sh /etc/rc.d/netif restart em0 em1
+.Ed
+.Pp
+This preserves the traditional calling convention where scripts
+accept multiple resource names after the command argument.
+.Pp
+Legacy scripts are auto-classified during loading:
+.Bl -bullet -compact
+.It
+Scripts containing
+.Va pidfile=
+or
+.Va command=
+.Pq without Va start_cmd=
+become
+.Dq legacy-forking
+units, which run under
+.Xr rcd-exec 8
+reaper mode for reliable process tracking without pidfiles.
+.It
+Scripts containing only comments and blank lines are auto-detected as
+.Dq barrier
+units (pure synchronization points).
+.It
+Scripts without
+.Va rcvar=
+are always enabled, matching
+.Xr rc.subr 8
+behavior.
+.El
+.Pp
+Legacy scripts have the following limitations compared to native units:
+.Bl -bullet -compact
+.It
+No resource control via
+.Xr rctl 8 .
+.It
+No OOM protection.
+.It
+No socket activation.
+.El
+.Pp
+Plain legacy scripts (without pidfile or command) additionally lack
+process descriptor tracking and automatic restart on failure.
+Legacy-forking scripts get process tracking through the
+.Xr rcd-exec 8
+sub-reaper.
+.Sh EMBEDDED LUA
+Hook fields
+.Pq Cm start_precmd , exec , stop_command , etc.
+that begin with
+.Dq lua:
+are evaluated in an embedded Lua interpreter.
+The following built-in modules are available:
+.Bl -tag -width "rcd.exec_output(cmd)" -compact
+.It Cm rcd.sysctl(name [, val])
+Read or write a sysctl.
+.It Cm rcd.kenv(name)
+Read a kernel environment variable.
+.It Cm rcd.kldload(mod)
+Load a kernel module.
+.It Cm rcd.kldstat(mod)
+Check if a kernel module is loaded.
+.It Cm rcd.exec_output(cmd)
+Run a command and capture stdout.
+.It Cm rcd.exec_stdin(cmd, data)
+Run a command feeding data to stdin.
+.It Cm rcd.sleep(secs)
+Sleep without forking.
+.It Cm rcd.symlink(target, path)
+Create a symlink.
+.It Cm rcd.log(level, msg)
+Log to syslog.
+.It Cm rcd.config
+Table of service config from override file.
+.It Cm rcd.instance
+Template instance name (or nil).
+.It Cm rcd.instance_config
+Per-instance config table (templates only).
+.It Cm posix.chmod(path, mode)
+Change file mode.
+.It Cm posix.chown(path, owner)
+Change file owner.
+.It Cm ucl
+Built-in UCL parser module.
+.El
+.Pp
+Dynamic Lua modules from
+.Pa /usr/lib/flua/
+.Pq lfs, jail, yaml, etc.
+are available after
+.Cm FILESYSTEMS
+is reached.
+.Sh DISKLESS BOOT
+If the sysctl
+.Va vfs.nfs.diskless_valid
+is set,
+.Nm
+detects a diskless boot and executes
+.Pa /etc/rc.initdiskless
+before loading any units.
+.Sh SIGNALS
+.Bl -tag -width SIGUSR1
+.It Dv SIGTERM , SIGINT
+Initiate ordered shutdown of all services.
+If
+.Cm precious_machine
+is set in
+.Xr rcd.conf 5 ,
+the signal is ignored and a warning is logged.
+.It Dv SIGHUP
+Reload configuration and rescan unit directories.
+.It Dv SIGUSR1
+Trigger a safe in-place binary upgrade.
+.Nm
+saves its state
+.Pq running service names, PIDs, and process descriptor fds
+to
+.Pa /var/run/rcd.state
+in UCL format, then re-execs itself.
+The new binary restores the saved state and continues supervising
+all running services without restarting them.
+Process descriptor fds survive the exec by temporarily clearing
+.Dv PD_CLOEXEC .
+The
+.Dv PROC_REAP_ACQUIRE
+status is preserved across exec by the kernel.
+.It Dv SIGALRM
+During the boot phase only: re-read per-service override files
+from
+.Pa /etc/rcd.conf.d/ .
+This allows enabling or disabling services while boot is in progress.
+.It Dv SIGCHLD
+Reap zombie children.
+As subreaper,
+.Nm
+inherits orphaned processes from legacy scripts and their children.
+Uses
+.Fn waitpid -1 WNOHANG
+to reap all pending zombies.
+.El
+.Sh FILES
+.Bl -tag -width "/var/run/rcd.state" -compact
+.It Pa /etc/rcd.conf
+Global configuration.
+.It Pa /etc/rcd.conf.d/
+Per-service overrides and template instances.
+.It Pa /etc/rcd.d/
+System unit files.
+.It Pa /var/run/rcd.sock
+Control socket.
+.It Pa /var/run/rcd.state
+Transient state file used during safe upgrade
+.Pq Dv SIGUSR1 .
+Created before re-exec and deleted after state is restored.
+.El
+.Sh SEE ALSO
+.Xr rcd-lua 3 ,
+.Xr rcd.conf 5 ,
+.Xr rcd.d 5 ,
+.Xr rcctl 8 ,
+.Xr rcd-exec 8 ,
+.Xr init 8 ,
+.Xr rc 8
+.Sh AUTHORS
+.An Baptiste Daroussin Aq Mt bapt@FreeBSD.org

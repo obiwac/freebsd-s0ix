@@ -1,0 +1,169 @@
+.\" Copyright (c) 2026 Baptiste Daroussin <bapt@FreeBSD.org>
+.\"
+.\" SPDX-License-Identifier: BSD-2-Clause
+.\"
+.Dd April 30, 2026
+.Dt RCD-EXEC 8
+.Os
+.Sh NAME
+.Nm rcd-exec
+.Nd pre-exec setup helper for rcd
+.Sh SYNOPSIS
+.Nm
+.Ar command
+.Op Ar args ...
+.Sh DESCRIPTION
+.Nm
+is a helper binary spawned by
+.Xr rcd 8
+via
+.Xr posix_spawn 3
+to perform privileged setup operations that cannot be expressed as
+.Xr posix_spawn 3
+file actions.
+After applying the setup,
+.Nm
+.Xr execvp 3 Ns s
+the actual service command.
+.Pp
+.Nm
+reads its configuration from environment variables set by
+.Xr rcd 8 :
+.Bl -tag -width "RCD_LOGIN_CLASS"
+.It Ev RCD_USER
+User to run the service as
+.Pq Xr setuid 2 .
+.It Ev RCD_GROUP
+Primary group
+.Pq Xr setgid 2 .
+.It Ev RCD_GROUPS
+Comma-separated supplementary groups
+.Pq Xr setgroups 2 .
+.It Ev RCD_UMASK
+File creation mask (octal).
+.It Ev RCD_NICE
+Process nice level
+.Pq Xr setpriority 2 .
+.It Ev RCD_CPUSET
+CPU affinity specification
+.Pq e.g., Dq 0-3,8 .
+.It Ev RCD_FIB
+Routing table number, validated against
+.Va net.fibs
+.Pq Xr setfib 2 .
+.It Ev RCD_CHROOT
+Chroot directory
+.Pq Xr chroot 2 .
+.It Ev RCD_CHDIR
+Working directory
+.Pq Xr chdir 2 .
+.It Ev RCD_JAIL
+Jail name to attach to
+.Pq Xr jail_attach 2 .
+.It Ev RCD_LOGIN_CLASS
+Login class for resource limits
+.Pq Xr setusercontext 3 .
+.It Ev RCD_ENV_FILE
+File with additional environment variables (must be root-owned).
+Dangerous variables
+.Pq Ev LD_PRELOAD , Ev LD_LIBRARY_PATH , Ev IFS
+are rejected.
+.It Ev RCD_REAPER
+When set,
+.Nm
+enters sub-reaper mode instead of directly exec'ing the command.
+See
+.Sx REAPER MODE
+below.
+.It Ev RCD_INSTANCE
+Template instance name (for template units).
+.El
+.Pp
+Setup is applied in this order:
+.Bl -enum -compact
+.It
+Load environment file
+.It
+Set umask
+.It
+Set nice level
+.It
+Set CPU affinity
+.It
+Set FIB
+.It
+Attach to jail
+.It
+Chroot
+.It
+Change directory
+.It
+Drop credentials (login class, supplementary groups, setuid)
+.El
+.Pp
+All
+.Ev RCD_*
+variables are removed from the environment before exec.
+.Sh REAPER MODE
+When
+.Ev RCD_REAPER
+is set,
+.Nm
+becomes a sub-reaper for forking daemons and legacy rc.d scripts.
+This is used for services of type
+.Dq forking
+and
+.Dq legacy-forking .
+.Pp
+In reaper mode,
+.Nm
+performs the following:
+.Bl -enum
+.It
+Acquires sub-reaper status via
+.Xr procctl 2
+.Dv PROC_REAP_ACQUIRE .
+.It
+Forks a child process that applies the normal setup
+.Pq see above
+and execs the actual service command.
+.It
+Waits for the initial child to exit.
+For daemons that double-fork,
+the real daemon process is reparented to
+.Nm
+.Pq as the sub-reaper .
+.It
+Finds the daemon PID using
+.Dv PROC_REAP_GETPIDS .
+No pidfiles are needed.
+.It
+Monitors the daemon until it exits.
+.El
+.Pp
+Signal handling in reaper mode:
+.Bl -tag -width SIGTERM
+.It Dv SIGTERM
+Kills the entire process subtree via
+.Dv PROC_REAP_KILL
+and exits.
+.It Other signals
+Forwarded to the daemon process
+.Pq e.g., Dv SIGHUP No for reload .
+.El
+.Pp
+.Xr rcd 8
+tracks the
+.Nm
+sub-reaper via its process descriptor.
+The sub-reaper tracks the daemon via the reaper mechanism.
+This provides reliable supervision of forking daemons without
+pidfile races.
+.Sh SEE ALSO
+.Xr jail 2 ,
+.Xr procctl 2 ,
+.Xr setuid 2 ,
+.Xr posix_spawn 3 ,
+.Xr rcd 8
+.Sh AUTHORS
+.An Baptiste Daroussin Aq Mt bapt@FreeBSD.org

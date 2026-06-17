@@ -1,0 +1,7 @@
+name = "hooks_test";
+type = "simple";
+command = "/usr/bin/test";
+setup_cmd = "/usr/bin/setup";
+start_precmd = "/usr/bin/prestart";
+stop_postcmd = "/usr/bin/poststop";
+provides = ["hooks_test"];

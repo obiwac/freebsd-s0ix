@@ -1,0 +1,445 @@
+.\" Copyright (c) 2026 Baptiste Daroussin <bapt@FreeBSD.org>
+.\"
+.\" SPDX-License-Identifier: BSD-2-Clause
+.\"
+.Dd April 29, 2026
+.Dt RCD-LUA 3
+.Os
+.Sh NAME
+.Nm rcd-lua
+.Nd Lua API for rcd service hooks
+.Sh DESCRIPTION
+.Xr rcd 8
+embeds a Lua interpreter for evaluating service hooks and oneshot
+.Cm exec
+blocks.
+Hook fields
+.Pq Cm start_precmd , start_postcmd , stop_precmd , stop_postcmd , exec , stop_command
+whose value begins with the prefix
+.Dq lua:
+are evaluated as Lua code in this interpreter.
+.Pp
+The Lua state is initialized once at daemon startup.
+It is configured identically to
+.Xr flua 1 :
+the standard Lua libraries are loaded, then the built-in modules
+.Cm posix ,
+.Cm ucl ,
+and
+.Cm rcd
+are registered.
+Module search paths point to
+.Pa /usr/share/flua/
+and
+.Pa /usr/lib/flua/
+for dynamic modules
+.Pq Cm lfs , jail , yaml , hash , etc. .
+.Pp
+Dynamic modules require
+.Pa /usr
+to be mounted and are therefore only available after the
+.Cm FILESYSTEMS
+barrier has been reached.
+The built-in modules are always available, including during early boot
+before any filesystem is mounted.
+.Ss Security
+.Bl -bullet -compact
+.It
+.Fn os.execute
+is replaced with a safe version using
+.Xr posix_spawn 3
+instead of
+.Xr system 3 .
+.It
+.Fn io.popen
+is removed entirely because
+.Xr popen 3
+is unsafe in a signal-modified context.
+.It
+.Fn rcd.exec_output
+and
+.Fn rcd.exec_stdin
+use
+.Xr posix_spawn 3
+with explicit pipe setup.
+.El
+.Ss Return value convention
+Hook functions that return
+.Dv false
+or
+.Dv nil
+cause the hook to be treated as a failure.
+Returning
+.Dv true
+or nothing indicates success.
+.Sh RCD MODULE
+The
+.Cm rcd
+module provides system operations that avoid
+.Xr fork 2
+overhead and are safe to use during early boot.
+.Bl -tag -width indent
+.It Fn rcd.sysctl "name" Op "value"
+Read or write a
+.Xr sysctl 3
+variable.
+.Pp
+In read mode
+.Pq one argument ,
+returns the sysctl value as a string, or
+.Dv nil
+and an error message on failure.
+.Pp
+In write mode
+.Pq two arguments ,
+sets the sysctl to
+.Fa value
+and returns
+.Dv true
+on success, or
+.Dv nil
+and an error message on failure.
+.Bd -literal -offset indent
+\-\- Read
+local hostname = rcd.sysctl("kern.hostname")
+
+\-\- Write
+rcd.sysctl("hw.usb.template", "\-1")
+.Ed
+.It Fn rcd.kenv "name"
+Read a kernel environment variable set by the boot loader.
+Returns the value as a string, or
+.Dv nil
+and an error message if the variable does not exist.
+.Bd -literal -offset indent
+local cloud = rcd.kenv("smbios.system.product")
+.Ed
+.It Fn rcd.kldload "module"
+Load a kernel module via
+.Xr kldload 2 .
+If the module is already loaded
+.Pq checked via Xr modfind 2 ,
+this is a no-op.
+Returns
+.Dv true
+on success, or
+.Dv nil
+and an error message on failure.
+.Bd -literal -offset indent
+rcd.kldload("if_bridge")
+.Ed
+.It Fn rcd.kldstat "module"
+Check if a kernel module is loaded via
+.Xr modfind 2 .
+Returns
+.Dv true
+if loaded,
+.Dv false
+otherwise.
+.Bd -literal -offset indent
+if not rcd.kldstat("ipfw") then
+    rcd.kldload("ipfw")
+end
+.Ed
+.It Fn rcd.exec_output "command"
+Run
+.Fa command
+via
+.Pa /bin/sh
+.Fl c
+and capture its standard output.
+Uses
+.Xr posix_spawn 3
+with a pipe.
+The trailing newline is stripped from the output.
+Returns the output as a string, or
+.Dv nil
+and an error message on failure.
+.Bd -literal -offset indent
+local ifaces = rcd.exec_output("ifconfig \-l")
+.Ed
+.It Fn rcd.exec_stdin "command" "data"
+Run
+.Fa command
+via
+.Pa /bin/sh
+.Fl c
+and feed
+.Fa data
+to its standard input.
+Uses
+.Xr posix_spawn 3
+with a pipe.
+Returns
+.Dv true
+on success
+.Pq exit code 0 ,
+or
+.Dv nil
+and
+.Dq command failed
+on failure.
+.Pp
+This is useful for feeding configuration to commands without
+temporary files:
+.Bd -literal -offset indent
+local rules = "add 100 allow ip from any to any\en"
+rcd.exec_stdin("ipfw \-q /dev/stdin", rules)
+.Ed
+.It Fn rcd.sleep "seconds"
+Sleep for the specified number of seconds using
+.Xr nanosleep 2 .
+Accepts fractional seconds.
+Does not fork a process.
+.Bd -literal -offset indent
+rcd.sleep(0.5)  \-\- sleep 500 ms
+.Ed
+.It Fn rcd.symlink "target" "path"
+Create a symbolic link at
+.Fa path
+pointing to
+.Fa target .
+If
+.Fa path
+already exists, it is removed first.
+Returns
+.Dv true
+on success, or
+.Dv nil
+and an error message on failure.
+.Bd -literal -offset indent
+rcd.symlink("/dev/null", "/var/run/syslogd.pid")
+.Ed
+.It Fn rcd.log "level" "message"
+Log a message via
+.Xr syslog 3 .
+.Fa level
+is one of:
+.Dq info ,
+.Dq warn ,
+.Dq debug ,
+or
+.Dq err .
+.Bd -literal -offset indent
+rcd.log("info", "network interfaces configured")
+.Ed
+.It Va rcd.config
+A Lua table containing the service's global configuration from
+its override file
+.Pa /etc/rcd.conf.d/<service> .
+This table is populated before each hook execution.
+If there is no override file, this is an empty table.
+.Pp
+Example override file:
+.Bd -literal -offset indent
+\-\- /etc/rcd.conf.d/sshd
+enable = true;
+command_args = "\-o UseDNS=no";
+port = 2222;
+.Ed
+.Pp
+Accessed in Lua:
+.Bd -literal -offset indent
+local port = rcd.config.port or 22
+.Ed
+.It Va rcd.instance
+The template instance name as a string, or
+.Dv nil
+if the unit is not a template instance.
+.Pp
+For a unit
+.Dq dhclient@em0 ,
+.Va rcd.instance
+is
+.Dq em0 .
+.It Va rcd.instance_config
+A Lua table containing per-instance configuration from the
+.Cm instances
+block in the template's override file.
+Only populated for template instances; otherwise an empty table.
+.Pp
+Example override file for a geli template:
+.Bd -literal -offset indent
+\-\- /etc/rcd.conf.d/geli
+instances {
+    ada0p4 { flags = "\-p \-k /boot/keys/ada0p4.key"; }
+    ada1p4 { }
+}
+.Ed
+.Pp
+Accessed in Lua:
+.Bd -literal -offset indent
+local flags = rcd.instance_config.flags or ""
+.Ed
+.El
+.Sh POSIX MODULE
+The built-in
+.Cm posix
+module provides POSIX system call wrappers from the flua
+.Pa lposix.c
+implementation.
+The most commonly used functions in service hooks are:
+.Bl -tag -width indent
+.It Fn posix.chmod "path" "mode"
+Change file mode bits.
+.Fa mode
+is an integer
+.Pq e.g., 0755 .
+.Bd -literal -offset indent
+posix.chmod("/var/run/foo.sock", 0660)
+.Ed
+.It Fn posix.chown "path" "owner"
+Change file owner.
+.Fa owner
+is a string
+.Pq Dq "root:wheel" .
+.El
+.Pp
+The full list of functions in the
+.Cm posix
+module includes:
+.Fn fork ,
+.Fn exec ,
+.Fn pipe ,
+.Fn dup2 ,
+.Fn close ,
+.Fn open ,
+.Fn read ,
+.Fn write ,
+.Fn stat ,
+.Fn mkdir ,
+.Fn rmdir ,
+.Fn unlink ,
+.Fn rename ,
+.Fn chdir ,
+.Fn getcwd ,
+.Fn getpid ,
+and others.
+See the flua
+.Pa lposix.c
+source for the complete API.
+.Sh UCL MODULE
+The built-in
+.Cm ucl
+module provides a UCL parser for reading configuration files
+in Lua.
+It is the same module available in
+.Xr flua 1 .
+.Bl -tag -width indent
+.It Fn ucl.parser
+Create a new UCL parser object.
+.It Fn parser:parse_string "string"
+Parse a UCL string.
+.It Fn parser:get_object
+Return the parsed object as a Lua table.
+.El
+.Bd -literal -offset indent
+local p = ucl.parser()
+p:parse_string('key = "value"; num = 42;')
+local obj = p:get_object()
+print(obj.key)  \-\- "value"
+print(obj.num)  \-\- 42
+.Ed
+.Sh DYNAMIC MODULES
+After the
+.Cm FILESYSTEMS
+barrier is reached and
+.Pa /usr
+is mounted, the following dynamic Lua modules from
+.Pa /usr/lib/flua/
+become available:
+.Bl -tag -width indent -compact
+.It Cm lfs
+LuaFileSystem: directory iteration, file attributes.
+.It Cm jail
+Jail parameter manipulation.
+.It Cm yaml
+YAML parser.
+.It Cm hash
+Cryptographic hash functions (sha256, etc.).
+.El
+.Pp
+These modules are loaded on demand via
+.Fn require :
+.Bd -literal -offset indent
+local lfs = require("lfs")
+for entry in lfs.dir("/var/run") do
+    \-\- ...
+end
+.Ed
+.Sh EXAMPLES
+A oneshot unit using Lua to load a kernel module and configure
+a sysctl:
+.Bd -literal -offset indent
+name = "mysetup";
+type = "oneshot";
+provide = ["mysetup"];
+require = ["mountcritlocal"];
+
+exec = <<EOD
+lua:
+rcd.kldload("my_driver")
+rcd.sysctl("hw.my_driver.enable", "1")
+rcd.log("info", "my_driver configured")
+EOD;
+.Ed
+.Pp
+A start_precmd hook that checks a condition:
+.Bd -literal -offset indent
+start_precmd = <<EOD
+lua:
+local prod = rcd.kenv("smbios.system.product")
+if prod == nil then
+    rcd.log("warn", "cannot detect hardware")
+    return false
+end
+EOD;
+.Ed
+.Pp
+A oneshot that cleans a directory using lfs (requires FILESYSTEMS):
+.Bd -literal -offset indent
+name = "cleanvar";
+type = "oneshot";
+provide = ["cleanvar"];
+require = ["FILESYSTEMS", "var"];
+
+exec = <<EOD
+lua:
+local lfs = require("lfs")
+for f in lfs.dir("/var/run") do
+    if f:match("%.pid$") then
+        os.remove("/var/run/" .. f)
+    end
+end
+EOD;
+.Ed
+.Pp
+A template hook using per-instance configuration:
+.Bd -literal -offset indent
+\-\- In the geli template unit:
+start_precmd = <<EOD
+lua:
+local dev = rcd.instance
+local flags = rcd.instance_config.flags or ""
+os.execute("geli attach " .. flags .. " /dev/" .. dev)
+EOD;
+.Ed
+.Pp
+Writing data to a command's stdin:
+.Bd -literal -offset indent
+exec = <<EOD
+lua:
+local conf = io.open("/etc/pf.conf"):read("*a")
+rcd.exec_stdin("pfctl -f /dev/stdin", conf)
+EOD;
+.Ed
+.Sh SEE ALSO
+.Xr rcd 8 ,
+.Xr rcd.d 5 ,
+.Xr flua 1 ,
+.Xr sysctl 3 ,
+.Xr kenv 2 ,
+.Xr kldload 2 ,
+.Xr posix_spawn 3
+.Sh AUTHORS
+.An Baptiste Daroussin Aq Mt bapt@FreeBSD.org

@@ -1,0 +1,15 @@
+#!/bin/sh
+#
+# PROVIDE: test_legacy
+# REQUIRE: NETWORKING FILESYSTEMS
+# BEFORE: LOGIN
+# KEYWORD: nojail
+
+. /etc/rc.subr
+
+name="test_legacy"
+rcvar="test_legacy_enable"
+command="/usr/bin/true"
+
+load_rc_config $name
+run_rc_command "$1"

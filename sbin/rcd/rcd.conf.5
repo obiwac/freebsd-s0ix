@@ -1,0 +1,199 @@
+.\" Copyright (c) 2026 Baptiste Daroussin <bapt@FreeBSD.org>
+.\"
+.\" SPDX-License-Identifier: BSD-2-Clause
+.\"
+.Dd April 30, 2026
+.Dt RCD.CONF 5
+.Os
+.Sh NAME
+.Nm rcd.conf
+.Nd global configuration for rcd
+.Sh DESCRIPTION
+The
+.Nm
+file is a UCL-format configuration file read by
+.Xr rcd 8
+at startup.
+All fields are optional; sensible defaults are used.
+.Sh FIELDS
+.Bl -tag -width "shutdown_timeout_ms"
+.It Cm parallel
+Enable parallel service startup.
+Default:
+.Cm true .
+.It Cm max_parallel
+Maximum concurrent service starts.
+0 means unlimited.
+Default:
+.Cm 0 .
+.It Cm control_socket
+Path to the control UNIX socket.
+Default:
+.Pa /var/run/rcd.sock .
+.It Cm control_permissions
+Permissions on the control socket.
+Accepts integer (0660), octal string ("0660"), symbolic ("rw-rw----"),
+or chmod-style ("u=rw,g=rw").
+Default:
+.Cm 0660 .
+.It Cm control_group
+Group allowed to connect to the control socket.
+Default:
+.Cm wheel .
+.It Cm log_level
+Logging verbosity: "debug", "info", "warning", or "error".
+Default:
+.Cm info .
+.It Cm stop_timeout_ms
+Per-service stop timeout in milliseconds.
+Default:
+.Cm 10000 .
+.It Cm shutdown_timeout_ms
+Global shutdown watchdog timeout in milliseconds.
+Default:
+.Cm 90000 .
+.It Cm firstboot_sentinel
+Path to the firstboot sentinel file.
+Default:
+.Pa /firstboot .
+.It Cm precious_machine
+When set to
+.Cm true ,
+refuse shutdown signals
+.Pq Dv SIGTERM , SIGINT .
+Guards against misdirected shutdown commands.
+Default:
+.Cm false .
+.It Cm quiet_boot
+Suppress info-level log messages during boot.
+Normal logging is restored after boot completes.
+Default:
+.Cm false .
+.It Cm veriexec
+Verify unit file ownership and permissions before loading.
+Unit files not owned by root or world-writable are rejected.
+Default:
+.Cm false .
+.El
+.Sh PER-SERVICE OVERRIDES
+Per-service configuration files are stored in
+.Pa /etc/rcd.conf.d/<service> .
+These UCL files are merged on top of the unit's configuration.
+All unit fields are supported.
+.Ss Merge Semantics
+.Bl -tag -width "Objects"
+.It Scalars
+Replaced.
+For example,
+.Cm command , command_args , sig_stop , start_delay ,
+hooks
+.Pq Cm setup_cmd , start_precmd , No etc. .
+.It Arrays
+Appended, with duplicates skipped.
+For example,
+.Cm provides , requires , before , keywords , required_dirs ,
+.Cm required_files , required_modules , required_vars .
+.It Objects
+Merged key by key.
+For example,
+.Cm restart , process , environment , jail , logging .
+.It Cm access
+Arrays within
+.Cm access
+are replaced, not appended, since they represent a complete ACL.
+.El
+.Ss Removing Array Entries
+The
+.Cm remove {}
+block removes specific entries from arrays:
+.Bd -literal -offset indent
+remove {
+    requires = ["old_dep"];
+    keywords = ["nostart"];
+}
+.Ed
+.Ss Replacing Arrays Entirely
+The
+.Cm replace {}
+block replaces an array in its entirety, discarding the
+unit file values:
+.Bd -literal -offset indent
+replace {
+    keywords = ["nojail"];
+}
+.Ed
+.Ss Application Order
+.Bl -enum -compact
+.It
+.Cm remove {}
+entries are deleted.
+.It
+Scalars are replaced; arrays are appended; objects are merged.
+.It
+.Cm replace {}
+arrays overwrite the result.
+.Sh TEMPLATE INSTANCES
+For template units, the override file declares instances:
+.Bd -literal -offset indent
+# /etc/rcd.conf.d/dhclient
+instances ["em0", "wlan0"];
+.Ed
+.Pp
+With per-instance configuration:
+.Bd -literal -offset indent
+# /etc/rcd.conf.d/geli
+instances {
+    ada0p4 {
+        flags = "-p -k /boot/keys/ada0p4.key";
+        tries = 5;
+    }
+    ada1p4 {}
+}
+.Ed
+.Pp
+Instance config is accessible in Lua hooks via
+.Cm rcd.instance_config .
+The global section (outside
+.Cm instances )
+is accessible via
+.Cm rcd.config .
+.Sh EXAMPLES
+.Bd -literal -offset indent
+# /etc/rcd.conf
+parallel = true;
+max_parallel = 8;
+control_permissions = "rw-rw----";
+log_level = "info";
+stop_timeout_ms = 15000;
+.Ed
+.Bd -literal -offset indent
+# /etc/rcd.conf.d/nginx
+enable = true;
+restart {
+    policy = "always";
+    delay = 2000;
+}
+access {
+    reload = ["www", "@webadmins"];
+}
+.Ed
+.Pp
+Adding a dependency to a packaged service:
+.Bd -literal -offset indent
+# /etc/rcd.conf.d/apache24
+enable = true;
+requires = ["valkey"];    # appended to existing requires
+.Ed
+.Pp
+Overriding stop signal and adding a keyword:
+.Bd -literal -offset indent
+# /etc/rcd.conf.d/myapp
+sig_stop = "SIGUSR1";
+keywords = ["resume"];
+.Ed
+.Sh SEE ALSO
+.Xr rcd 8 ,
+.Xr rcd.d 5 ,
+.Xr rcctl 8
+.Sh AUTHORS
+.An Baptiste Daroussin Aq Mt bapt@FreeBSD.org

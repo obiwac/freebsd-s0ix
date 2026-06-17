@@ -1,0 +1,54 @@
+name = "sshd";
+description = "Secure Shell Daemon";
+type = "simple";
+command = "/usr/sbin/sshd";
+command_args = "-D -f /etc/ssh/sshd_config";
+
+provides = ["sshd", "ssh"];
+requires = ["NETWORKING", "FILESYSTEMS"];
+before = ["LOGIN"];
+keywords = [];
+
+socket "ssh" {
+    type = "stream";
+    listen = "tcp:*:22";
+    backlog = 128;
+}
+
+process {
+    user = "root";
+    group = "wheel";
+    umask = "022";
+    nice = 0;
+    oom_protect = true;
+}
+
+restart {
+    policy = "on-failure";
+    max_retries = 5;
+    delay = 5000;
+    backoff = "exponential";
+    reset = 60000;
+}
+
+rctl {
+    memoryuse = { action = "deny"; amount = "1g"; };
+    openfiles = { action = "deny"; amount = "256"; };
+    maxproc = { action = "deny"; amount = "32"; };
+}
+
+jail {
+    enable = true;
+    options = ["netv4"];
+    ip4addr = ["192.0.2.1"];
+}
+
+environment {
+    LC_ALL = "C";
+    PATH = "/sbin:/bin:/usr/sbin:/usr/bin";
+}
+
+logging {
+    stdout = "syslog:daemon.info";
+    stderr = "syslog:daemon.err";
+}

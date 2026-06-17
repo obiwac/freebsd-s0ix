@@ -1,0 +1,5 @@
+name = "disabled_test";
+type = "simple";
+command = "/usr/bin/test";
+enable = false;
+provides = ["disabled_test"];

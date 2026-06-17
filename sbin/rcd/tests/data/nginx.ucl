@@ -1,0 +1,26 @@
+name = "nginx";
+description = "Nginx HTTP Server";
+type = "simple";
+command = "/usr/local/sbin/nginx";
+command_args = "-g 'daemon off;'";
+
+provides = ["nginx", "http"];
+requires = ["NETWORKING", "sshd"];
+
+restart {
+    policy = "always";
+    max_retries = 10;
+    delay = 2000;
+    backoff = "linear";
+}
+
+process {
+    user = "www";
+    group = "www";
+    cpuset = "0-3";
+}
+
+rctl {
+    memoryuse = { action = "deny"; amount = "2g"; };
+    pcpu = { action = "throttle"; amount = "80"; };
+}

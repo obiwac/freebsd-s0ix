@@ -1,0 +1,7 @@
+# Test replace{}: completely replaces arrays.
+enable = true;
+
+replace {
+    requires = ["X", "Y"];
+    keywords = ["resume"];
+}

@@ -1,0 +1,11 @@
+#!/bin/sh
+#
+# PROVIDE: test_daemon2
+# REQUIRE: DAEMON
+
+. /etc/rc.subr
+name="test_daemon2"
+command="/usr/sbin/test_daemon2"
+
+load_rc_config $name
+run_rc_command "$1"

@@ -1,0 +1,351 @@
+.\" Copyright (c) 2026 Baptiste Daroussin <bapt@FreeBSD.org>
+.\"
+.\" SPDX-License-Identifier: BSD-2-Clause
+.\"
+.Dd April 30, 2026
+.Dt RCD.D 5
+.Os
+.Sh NAME
+.Nm rcd.d
+.Nd service unit file format for rcd
+.Sh DESCRIPTION
+Service units for
+.Xr rcd 8
+are UCL files stored in
+.Pa /etc/rcd.d/
+and
+.Pa <localbase>/etc/rcd.d/ .
+Each file defines one service.
+.Sh REQUIRED FIELDS
+.Bl -tag -width "provides"
+.It Cm name
+Service name.
+Must match
+.Ql [a-zA-Z0-9][a-zA-Z0-9._-]* .
+.It Cm provides
+Array of provision names for dependency resolution.
+.El
+.Sh SERVICE TYPES
+.Bl -tag -width "barrier"
+.It Cm simple
+Foreground daemon, tracked directly via process descriptor.
+Preferred type for new services.
+.It Cm forking
+Daemon that daemonizes itself (forks and parent exits).
+.Xr rcd-exec 8
+runs in reaper mode to supervise the daemon through its
+double-fork daemonization.
+.It Cm oneshot
+Run-to-completion command.
+May use
+.Cm command
+or
+.Cm exec .
+.It Cm barrier
+Dependency synchronization point.
+No command executed.
+Auto-detected from legacy scripts that contain only comments
+and blank lines.
+.El
+.Pp
+Legacy rc.d scripts are additionally classified as
+.Dq legacy
+or
+.Dq legacy-forking
+.Pq for scripts with Va pidfile= No or Va command=
+by
+.Xr rcd 8
+during loading.
+Scripts with
+.Ql KEYWORD: NORCD
+are ignored entirely, allowing them to opt out of
+.Xr rcd 8
+management.
+See
+.Xr rcd 8
+for details on the compatibility layer.
+.Sh COMMAND FIELDS
+.Bl -tag -width "command_args"
+.It Cm command
+Path to the service executable.
+Required for simple, forking, and oneshot types without
+.Cm exec .
+.It Cm command_args
+Arguments to the command.
+.It Cm exec
+Inline code for oneshots.
+Prefix with
+.Dq lua:
+for Lua, otherwise shell.
+Use UCL heredoc for multiline:
+.Bd -literal -offset indent
+exec = <<LUAEOF
+lua:
+\&...
+LUAEOF;
+.Ed
+.It Cm command_prepend
+Command prepended before the service binary.
+Used for wrappers
+.Pq e.g., valgrind, strace .
+Can be overridden from
+.Pa /etc/rcd.conf.d/ .
+.It Cm stop_command
+Custom stop command.
+Supports
+.Dq lua:
+prefix.
+.It Cm off_command
+Command executed at boot when the service is disabled.
+Used for cleanup or state-setting even when not started.
+Supports
+.Dq lua:
+prefix.
+.It Cm enable
+Enabled state
+.Pq default: false .
+Services must be explicitly enabled via the unit file or
+.Xr rcctl 8 .
+.El
+.Sh DEPENDENCIES
+.Bl -tag -width "keywords"
+.It Cm requires
+Array of provision names that must be running before start.
+.It Cm before
+Array of provision names this service must start before.
+.It Cm keywords
+Filtering tags:
+.Cm nojail , nojailvnet , nostart , firstboot , resume .
+.Pp
+.Cm nostart
+prevents the service from being started during boot, but does not
+prevent manual start via
+.Xr rcctl 8 .
+This is distinct from
+.Cm enable = false ,
+which blocks both boot and manual start
+.Pq unless overridden with force/one flags .
+.El
+.Pp
+Dependencies can be extended via per-service overrides in
+.Pa /etc/rcd.conf.d/ .
+See
+.Xr rcd.conf 5
+for the override merge semantics.
+.Sh PRECONDITIONS
+.Bl -tag -width "required_sysctl"
+.It Cm required_dirs
+Directories that must exist.
+.It Cm required_files
+Files that must be readable.
+.It Cm required_modules
+Kernel modules to load via
+.Xr kldload 2 .
+.It Cm required_sysctl
+Sysctl key-value pairs that must match.
+.Bd -literal -offset indent
+required_sysctl {
+    "hw.machine_arch" = "amd64";
+}
+.Ed
+.It Cm required_vars
+Config variable names that must be set in the override file
+.Pa /etc/rcd.conf.d/<service>
+before the service can start.
+Used to enforce mandatory per-site configuration.
+.El
+.Sh HOOKS
+All hook fields accept shell commands or
+.Dq lua:
+prefixed Lua code.
+.Bl -tag -width "start_postcmd"
+.It Cm setup_cmd
+Run before
+.Cm start_precmd
+on start, restart, and reload.
+Like
+.Va ${name}_setup
+in
+.Xr rc.subr 8 .
+.It Cm start_precmd
+Run before starting.
+Return false (Lua) or non-zero (shell) to abort start.
+.It Cm start_postcmd
+Run after successful start.
+.It Cm stop_precmd
+Run before stopping.
+.It Cm stop_postcmd
+Run after stopping.
+.El
+.Sh SIGNALS
+.Bl -tag -width "sig_reload"
+.It Cm sig_stop
+Signal for stop.
+Accepts a signal number (1\(en31) or name
+.Pq e.g., Dq SIGTERM , Dq TERM .
+Default: SIGTERM (15).
+.It Cm sig_reload
+Signal for reload.
+Accepts a signal number (1\(en31) or name
+.Pq e.g., Dq SIGHUP , Dq HUP .
+Default: SIGHUP (1).
+.El
+.Sh RESTART POLICY
+.Bd -literal -offset indent
+restart {
+    policy = "on-failure";  # never, on-failure, always
+    max_retries = 5;
+    delay = 5000;           # milliseconds between retries
+    backoff = "exponential"; # none, linear, exponential
+    reset = 60000;          # milliseconds before retry counter resets
+}
+.Ed
+.Sh PROCESS CONFIGURATION
+.Bd -literal -offset indent
+process {
+    user = "www";
+    group = "www";
+    groups = ["operator", "video"];
+    chdir = "/var/www";
+    chroot = "/var/empty";
+    umask = 022;
+    nice = 5;
+    cpuset = "0-3";
+    fib = 1;
+    login_class = "daemon";
+    limits = "openfiles=1024:4096,stacksize=8388608";
+    env_file = "/etc/default/myservice";
+    oom_protect = true;
+}
+.Ed
+.Sh RESOURCE CONTROL
+.Bd -literal -offset indent
+rctl {
+    memoryuse = { action = "deny"; amount = "2g"; };
+    maxproc = { action = "deny"; amount = "64"; };
+    pcpu = { action = "throttle"; amount = "80"; };
+}
+.Ed
+.Sh SOCKET ACTIVATION
+.Bd -literal -offset indent
+socket "http" {
+    type = "stream";
+    listen = "tcp:*:80";
+    backlog = 128;
+}
+.Ed
+.Sh SERVICE JAIL
+.Bd -literal -offset indent
+jail {
+    enable = true;
+    options = ["netv4"];
+    ip4addr = ["192.0.2.1"];
+}
+.Ed
+.Sh ACCESS CONTROL
+.Bd -literal -offset indent
+access {
+    reload = ["www", "@webadmins"];
+    status = ["@users"];
+}
+.Ed
+.Pp
+Principals prefixed with
+.Ql @
+match group names.
+Root and the global
+.Cm control_group
+always have full access.
+.Sh CUSTOM COMMANDS
+.Bd -literal -offset indent
+commands {
+    configtest = "/usr/sbin/sshd -t";
+    rotate_log = <<LUAEOF
+lua:
+\&...
+LUAEOF;
+}
+.Ed
+.Pp
+Invoked via
+.Xr rcctl 8 :
+.Dl rcctl configtest sshd
+.Sh TEMPLATES
+Template units create per-instance services:
+.Bd -literal -offset indent
+name = "dhclient";
+template = true;
+command = "/sbin/dhclient";
+.Ed
+.Pp
+The instance name is appended as the last command argument.
+In Lua hooks,
+.Cm rcd.instance
+contains the instance name and
+.Cm rcd.instance_config
+the per-instance config table.
+.Pp
+Instances are declared in
+.Pa /etc/rcd.conf.d/<template> :
+.Bd -literal -offset indent
+instances ["em0", "wlan0"];
+.Ed
+.Sh LOGGING
+.Bd -literal -offset indent
+logging {
+    stdout = "syslog:daemon.info";
+    stderr = "file:/var/log/myservice.log";
+}
+.Ed
+.Pp
+Targets:
+.Cm syslog:<facility>.<level> ,
+.Cm file:<path> ,
+.Cm null .
+.Sh OTHER FIELDS
+.Bl -tag -width "start_delay"
+.It Cm description
+Human-readable description.
+.It Cm start_delay
+Delay before start in milliseconds.
+.It Cm environment {}
+Key-value pairs added to the service environment.
+.El
+.Sh EXAMPLES
+Simple daemon:
+.Bd -literal -offset indent
+name = "sshd";
+description = "Secure Shell Daemon";
+type = "simple";
+command = "/usr/sbin/sshd";
+command_args = "-D";
+provides = ["sshd"];
+requires = ["LOGIN", "FILESYSTEMS"];
+.Ed
+.Pp
+Oneshot with Lua:
+.Bd -literal -offset indent
+name = "cleartmp";
+type = "oneshot";
+provides = ["cleartmp"];
+
+exec = <<LUAEOF
+lua:
+local lfs = require('lfs')
+\&-- clean /tmp
+LUAEOF;
+.Ed
+.Pp
+Barrier:
+.Bd -literal -offset indent
+name = "FILESYSTEMS";
+type = "barrier";
+provides = ["FILESYSTEMS"];
+requires = ["root", "mountcritlocal"];
+.Ed
+.Sh SEE ALSO
+.Xr rcd 8 ,
+.Xr rcd.conf 5 ,
+.Xr rcctl 8
+.Sh AUTHORS
+.An Baptiste Daroussin Aq Mt bapt@FreeBSD.org
