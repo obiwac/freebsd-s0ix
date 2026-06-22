@@ -200,7 +200,6 @@ router_register_interrupts(struct router_softc *sc)
 {
 	struct nhi_dispatch tx[] = { { PDF_READ, router_complete_intr, sc },
 				     { PDF_WRITE, router_complete_intr, sc },
-				     { PDF_NOTIFY, router_complete_intr, sc },
 				     { 0, NULL, NULL } };
 	struct nhi_dispatch rx[] = { { PDF_READ, router_response_intr, sc },
 				     { PDF_WRITE, router_response_intr, sc },
@@ -751,11 +750,13 @@ router_prepare_cmd(struct router_softc *sc, struct router_command *cmd,
 	/* The last 4 bytes of data is the CRC. Compute CRC for just data. */
 	msg[msglen] = htobe32(tb_calc_crc(nhicmd->data, len - 4));
 
-	nhicmd->pdf = pdf;
+	nhicmd->pdf = PDF_READ;
 	nhicmd->req_len = len;
 
 	nhicmd->timeout = NHI_CMD_TIMEOUT;
 	nhicmd->retries = 0;
+	nhicmd->resp_buffer = (uint32_t *)cmd->resp_buffer;
+	nhicmd->resp_len = (cmd->dwlen + 3) * 4;
 	nhicmd->context = cmd;
 
 	cmd->retries = CFG_DEFAULT_RETRIES;
@@ -776,10 +777,7 @@ static void
 router_prepare_write(struct router_softc *sc, struct router_command *cmd,
     size_t len)
 {
-	router_prepare_cmd(sc, cmd, len, PDF_WRITE);
-
-	cmd->nhicmd->resp_buffer = (uint32_t *)cmd->resp_buffer;
-	cmd->nhicmd->resp_len = (cmd->dwlen + 3) * 4;
+	// TOOD wtf?
 }
 
 static  void
@@ -981,26 +979,16 @@ router_notify_intr(void *context, union nhi_ring_desc *ring, struct nhi_cmd_fram
 	return;
 }
 
-/**
- * Acknowledge a hotplug event packet.
- *
- * A hotplug acknowledgment packet is just a notification packet (6.4.2.7). It
- * must contain the HP_ACK event code and the adapter number as event info.
- *
- * @param sc The router softc.
- * @param event The hotplug event which prompted this ack.
- * @param unplug Whether this was a hot unplug event or hotplug.
- */
 static void
 router_hotplug_ack(struct router_softc *sc, struct tb_cfg_hotplug *event,
     bool unplug)
 {
-	struct router_command *cmd;
-	struct tb_cfg_notify *ack;
-	size_t len = sizeof(*ack);
-	int err;
-
-	return; // TODO Testing if we actually get retransmissions if we receive but don't ack.
+	struct router_command		*cmd;
+	struct tb_cfg_notify		*ack;
+	size_t				len = sizeof(*ack);
+	struct nhi_cmd_frame		*nhicmd;
+	uint32_t			*msg;
+	int				msglen, err;
 
 	if ((err = router_alloc_cmd(sc, &cmd)) != 0) {
 		tb_printf(sc, "Failed to allocate hotplug ack command: %d\n",
@@ -1011,25 +999,34 @@ router_hotplug_ack(struct router_softc *sc, struct tb_cfg_hotplug *event,
 	ack = router_get_frame_data(cmd);
 	bzero(ack, len);
 	ack->route = event->route;
-	/* Don't need to set sequence bit. */
+	/* TODO I don't get what the sequence bit is. */
 	ack->event_adap = TB_CFG_HP_ACK |
 	    (unplug ? TB_CFG_UPG_UNPLUG : TB_CFG_PG_PLUG);
 
-	router_prepare_notify(sc, cmd, len);
-	router_schedule(sc, cmd);
-	/* Don't call router_free_cmd! This will be done automatically! */
+	nhicmd = cmd->nhicmd;
+	msglen = (len - 4) / 4;
+	for (size_t i = 0; i < msglen; i++)
+		nhicmd->data[i] = htobe32(nhicmd->data[i]);
+
+	msg = (uint32_t *)nhicmd->data;
+	msg[msglen] = htobe32(tb_calc_crc(nhicmd->data, len - 4));
+
+	/* TODO We're gonna want to factor out a notify function. */
+	nhicmd->pdf = PDF_NOTIFY;
+	nhicmd->req_len = len;
+
+	nhicmd->timeout = NHI_CMD_TIMEOUT;
+	nhicmd->retries = 0;
+	nhicmd->context = cmd;
+
+	mtx_lock(&sc->mtx);
+	if ((err = nhi_tx_schedule(sc->ring0, nhicmd)) != 0)
+		tb_debug(sc, DBG_ROUTER, "nhi ring error "
+		    "%d\n", err);
+	mtx_unlock(&sc->mtx);
+	/* Don't call router_free_cmd! */
 }
 
-/**
- * Hotplug interrupt handler.
- *
- * Read the received hotplug event packet (6.4.2.10) and send acknowledgment.
- * See 6.8.
- *
- * @param context The router softc.
- * @param ring Unused.
- * @param nhicmd The command frame of the received hotplug packet.
- */
 static void
 router_hotplug_intr(void *context, union nhi_ring_desc *ring,
     struct nhi_cmd_frame *nhicmd)
