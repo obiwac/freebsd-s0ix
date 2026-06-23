@@ -91,6 +91,7 @@ struct nlpcb {
 #define NLF_EXT_ACK             0x02 /* Allow including extended TLVs in ack */
 #define	NLF_STRICT		0x04 /* Perform strict header checks */
 #define	NLF_MSG_INFO		0x08 /* Send caller info along with the notifications */
+#define NLF_SND_SYNC		0x10 /* Process send operations synchronously */
 
 SYSCTL_DECL(_net_netlink);
 SYSCTL_DECL(_net_netlink_debug);
@@ -138,6 +139,7 @@ void nl_process_receive_locked(struct nlpcb *nlp);
 void nl_set_source_metadata(struct mbuf *m, int num_messages);
 struct nl_buf *nl_buf_alloc(size_t len, int mflag);
 void nl_buf_free(struct nl_buf *nb);
+int nl_process_nbuf_sync(struct nl_buf *nb, struct nlpcb *nlp);
 
 #define	MAX_FAMILIES	20
 #define	MAX_GROUPS	64
