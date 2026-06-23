@@ -160,25 +160,11 @@ nl_process_received(struct nlpcb *nlp)
 void
 nl_on_transmit(struct nlpcb *nlp)
 {
-	NLP_LOCK(nlp);
-
-	struct socket *so = nlp->nl_socket;
-	if (__predict_false(nlp->nl_dropped_bytes > 0 && so != NULL)) {
-		unsigned long dropped_bytes = nlp->nl_dropped_bytes;
-		unsigned long dropped_messages = nlp->nl_dropped_messages;
-		nlp->nl_dropped_bytes = 0;
-		nlp->nl_dropped_messages = 0;
-
-		struct sockbuf *sb = &so->so_rcv;
-		NLP_LOG(LOG_DEBUG, nlp,
-		    "socket RX overflowed, %lu messages (%lu bytes) dropped. "
-		    "bytes: [%u/%u]", dropped_messages, dropped_bytes,
-		    sb->sb_ccc, sb->sb_hiwat);
-		/* TODO: send netlink message */
+	if ((nlp->nl_flags & NLF_SND_SYNC) == 0) {
+		NLP_LOCK(nlp);
+		nl_schedule_taskqueue(nlp);
+		NLP_UNLOCK(nlp);
 	}
-
-	nl_schedule_taskqueue(nlp);
-	NLP_UNLOCK(nlp);
 }
 
 void
@@ -369,4 +355,45 @@ nl_process_nbuf(struct nl_buf *nb, struct nlpcb *nlp)
 		return (false);
 	} else
 		return (true);
+}
+
+int
+nl_process_nbuf_sync(struct nl_buf *nb, struct nlpcb *nlp)
+{
+	struct nl_writer nw;
+	struct nlmsghdr *hdr;
+	int error;
+
+	NL_LOG(LOG_DEBUG3, "RX netlink buf %p on %p", nb, nlp->nl_socket);
+
+	if (!nl_writer_unicast(&nw, NLMSG_SMALL, nlp, false)) {
+		NL_LOG(LOG_DEBUG, "error allocating socket writer");
+		return (ENOBUFS);
+	}
+
+	struct nl_pstate npt = {
+		.nlp = nlp,
+		.lb.base = &nb->data[roundup2(nb->datalen, 8)],
+		.lb.size = nb->buflen - roundup2(nb->datalen, 8),
+		.nw = &nw,
+		.strict = nlp->nl_flags & NLF_STRICT,
+	};
+
+	for (; nb->offset + sizeof(struct nlmsghdr) <= nb->datalen;) {
+		hdr = (struct nlmsghdr *)&nb->data[nb->offset];
+		/* Save length prior to calling handler */
+		int msglen = NLMSG_ALIGN(hdr->nlmsg_len);
+		NL_LOG(LOG_DEBUG3, "parsing offset %d/%d",
+		    nb->offset, nb->datalen);
+		npt_clear(&npt);
+		error = nl_receive_message(hdr, nb->datalen - nb->offset, nlp,
+		    &npt);
+		nb->offset += msglen;
+		if (__predict_false(error != 0))
+			return (error);
+	}
+	NL_LOG(LOG_DEBUG3, "packet parsing done");
+	nlmsg_flush(&nw);
+
+	return (0);
 }
