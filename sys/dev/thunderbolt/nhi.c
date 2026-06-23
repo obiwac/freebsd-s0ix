@@ -1208,31 +1208,13 @@ nhi_intr(void *data)
 	 * Is that OK?  We keep our own copy of the PI and never read it from
 	 * hardware.  However, will overwriting it result in a missed
 	 * interrupt?
-	 *
-	 * Aymeric: I think not, spec says this is RO anyway.
 	 */
 	if (r->rx_ci != old_ci) {
-		uint32_t pissy = nhi_read_reg(sc, r->rx_pici_reg);
-		pissy = (pissy >> RX_RING_PI_SHIFT) << RX_RING_PI_SHIFT;
-		val = pissy | r->rx_ci;
+		val = r->rx_pi << RX_RING_PI_SHIFT | r->rx_ci;
 		tb_debug(sc, DBG_INTR | DBG_RXQ,
-		    "Writing new RX PICI= 0x%08x (thought PI was %d)\n", val, r->rx_pi);
+		    "Writing new RX PICI= 0x%08x\n", val);
 		nhi_write_reg(sc, r->rx_pici_reg, val);
 	}
-
-	/*
-	 * Need to read this necessarily to clear it; see 12.6.3.4.1.  Disable
-	 * ISR Auto-Clear must be set to 0.
-	 *
-	 * XXX This might not be necessary on all platforms.  It is on Pink
-	 * Sardine, but this was not being done previously so it might have
-	 * been working without this on whatever Scott was testing on.
-	 *
-	 * See QUIRK_AUTO_CLEAR_INT on Linux.
-	 */
-	nhi_read_reg(sc, NHI_ISR0);
-
-	printf("=== %s out\n", __func__);
 }
 
 static int
