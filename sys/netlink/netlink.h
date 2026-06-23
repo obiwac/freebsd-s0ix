@@ -90,6 +90,7 @@ struct sockaddr_nl {
 #define NETLINK_GET_STRICT_CHK		12 /* Strict header checking */
 
 #define	NETLINK_MSG_INFO		257 /* (FreeBSD-specific) Receive message originator data in cmsg */
+#define	NETLINK_SND_SYNC		258 /* (FreeBSD-specific) Process send operations synchronously */
 
 /*
  * RFC 3549, 2.3.2 Netlink Message Header

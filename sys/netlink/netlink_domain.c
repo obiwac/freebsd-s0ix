@@ -494,9 +494,11 @@ nl_close(struct socket *so)
 	bool was_bound = nlp->nl_bound;
 	NLP_UNLOCK(nlp);
 
-	/* Wait till all scheduled work has been completed  */
-	taskqueue_drain_all(nlp->nl_taskqueue);
-	taskqueue_free(nlp->nl_taskqueue);
+	if (nlp->nl_taskqueue != NULL) {
+		/* Wait till all scheduled work has been completed  */
+		taskqueue_drain_all(nlp->nl_taskqueue);
+		taskqueue_free(nlp->nl_taskqueue);
+	}
 
 	NLCTL_WLOCK();
 	NLP_LOCK(nlp);
@@ -592,7 +594,19 @@ nl_sosend(struct socket *so, struct sockaddr *addr, struct uio *uio,
 
         NL_LOG(LOG_DEBUG2, "sending message to kernel %u bytes", nb->datalen);
 
+	/* Sync path */
+	if (nlp->nl_flags & NLF_SND_SYNC) {
+		error = nl_process_nbuf_sync(nb, nlp);
+		if (error == 0) {
+			NL_LOG(LOG_DEBUG3, "success");
+			nl_buf_free(nb);
+			nb = NULL;
+		}
+		goto out;
+	}
+
 	SOCK_SENDBUF_LOCK(so);
+
 restart:
 	if (sb->sb_hiwat - sb->sb_ccc >= nb->datalen) {
 		TAILQ_INSERT_TAIL(&sb->nl_queue, nb, tailq);
@@ -690,6 +704,25 @@ nl_soreceive(struct socket *so, struct sockaddr **psa, struct uio *uio,
 	error = SOCK_IO_RECV_LOCK(so, SBLOCKWAIT(flags));
 	if (__predict_false(error))
 		return (error);
+
+	if (__predict_false(nlp->nl_dropped_bytes > 0)) {
+		NLP_LOCK(nlp);
+		unsigned long dropped_bytes = nlp->nl_dropped_bytes;
+		unsigned long dropped_messages = nlp->nl_dropped_messages;
+		nlp->nl_dropped_bytes = 0;
+		nlp->nl_dropped_messages = 0;
+		NLP_UNLOCK(nlp);
+
+		if (dropped_bytes > 0) {
+			NLP_LOG(LOG_DEBUG, nlp,
+			    "socket RX overflowed, %lu messages (%lu bytes) dropped. "
+			    "bytes: [%u/%u]", dropped_messages, dropped_bytes,
+			    sb->sb_ccc, sb->sb_hiwat);
+			/* XXX: Original code intended to send a netlink message here. */
+			SOCK_IO_RECV_UNLOCK(so);
+			return (ENOBUFS);
+		}
+	}
 
 	len = 0;
 	overflow = 0;
@@ -840,9 +873,61 @@ nl_getoptflag(int sopt_name)
 		return (NLF_STRICT);
 	case NETLINK_MSG_INFO:
 		return (NLF_MSG_INFO);
+	case NETLINK_SND_SYNC:
+		return (NLF_SND_SYNC);
 	}
 
 	return (0);
+}
+
+static int
+nl_sosend_switch_sync(struct socket *so, struct nlpcb *nlp, bool turn_on)
+{
+	int error = 0;
+	bool already_sync;
+	struct sockbuf *sb = &so->so_snd;
+
+	error = SOCK_IO_SEND_LOCK(so, SBLOCKWAIT(0));
+	if (error)
+		return (error);
+
+	already_sync = (nlp->nl_flags & NLF_SND_SYNC) != 0;
+	if (already_sync == turn_on) {
+		SOCK_IO_SEND_UNLOCK(so);
+		return (0);
+	}
+
+	if (turn_on) {
+		SOCK_SENDBUF_LOCK(so);
+		if (!TAILQ_EMPTY(&sb->nl_queue)){
+			SOCK_SENDBUF_UNLOCK(so);
+			SOCK_IO_SEND_UNLOCK(so);
+			return (EBUSY);
+		}
+		SOCK_SENDBUF_UNLOCK(so);
+
+		NLCTL_WLOCK();
+		nlp->nl_flags |= NLF_SND_SYNC;
+		NLCTL_WUNLOCK();
+
+		MPASS(nlp->nl_taskqueue != NULL);
+		taskqueue_drain_all(nlp->nl_taskqueue);
+		taskqueue_free(nlp->nl_taskqueue);
+		nlp->nl_taskqueue = NULL;
+	} else {
+		NLCTL_WLOCK();
+		nlp->nl_flags &= ~NLF_SND_SYNC;
+		NLCTL_WUNLOCK();
+
+		MPASS(nlp->nl_taskqueue == NULL);
+		nlp->nl_taskqueue = taskqueue_create("netlink_socket", M_WAITOK,
+		    taskqueue_thread_enqueue, &nlp->nl_taskqueue);
+		taskqueue_start_threads(&nlp->nl_taskqueue, 1, PWAIT,
+		    "netlink_socket (PID %u)", nlp->nl_process_id);
+	}
+
+	SOCK_IO_SEND_UNLOCK(so);
+	return (error);
 }
 
 static int
@@ -881,14 +966,21 @@ nl_ctloutput(struct socket *so, struct sockopt *sopt)
 		case NETLINK_EXT_ACK:
 		case NETLINK_GET_STRICT_CHK:
 		case NETLINK_MSG_INFO:
+		case NETLINK_SND_SYNC:
 			error = sooptcopyin(sopt, &optval, sizeof(optval), sizeof(optval));
 			if (error != 0)
 				break;
 
 			flag = nl_getoptflag(sopt->sopt_name);
 
-			if ((flag == NLF_MSG_INFO) && nlp->nl_linux) {
+			if ((flag == NLF_MSG_INFO || flag == NLF_SND_SYNC) &&
+			    nlp->nl_linux) {
 				error = EINVAL;
+				break;
+			}
+
+			if (flag == NLF_SND_SYNC) {
+				error = nl_sosend_switch_sync(so, nlp, optval != 0);
 				break;
 			}
 
@@ -915,6 +1007,7 @@ nl_ctloutput(struct socket *so, struct sockopt *sopt)
 		case NETLINK_EXT_ACK:
 		case NETLINK_GET_STRICT_CHK:
 		case NETLINK_MSG_INFO:
+		case NETLINK_SND_SYNC:
 			NLCTL_RLOCK();
 			optval = (nlp->nl_flags & nl_getoptflag(sopt->sopt_name)) != 0;
 			NLCTL_RUNLOCK();
