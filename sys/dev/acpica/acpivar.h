@@ -630,6 +630,29 @@ acpi_set_prepare_sleep(
 	acpi_prepare_sleep = hook;
 }
 
+/*
+ * ACPI cousin interrupts.
+ */
+#ifdef __x86_64__
+typedef void (*acpi_cousin_intr_setup_cb_t)(device_t dev);
+typedef void (*acpi_cousin_intr_detach_cb_t)(device_t dev);
+typedef void (*acpi_cousin_intr_intr_cb_t)(device_t dev);
+
+device_t	acpi_cousin_intr_req(device_t consumer,
+		    acpi_cousin_intr_setup_cb_t setup_cb,
+		    acpi_cousin_intr_detach_cb_t detach_cb,
+		    acpi_cousin_intr_intr_cb_t intr_cb);
+struct acpi_cousin_intr_consumers	*acpi_cousin_intr_provide(
+		    struct acpi_cousin_intr_consumers *cons_list,
+		    ACPI_HANDLE cons_handle);
+void		acpi_cousin_intr_detach(
+		    struct acpi_cousin_intr_consumers *cons_list);
+void		acpi_cousin_intr_trigger(
+		    struct acpi_cousin_intr_consumers *cons_list);
+void		acpi_cousin_intr_free_cons(
+		    struct acpi_cousin_intr_consumers *cons_list);
+#endif
+
 #ifdef __aarch64__
 /*
  * ARM specific ACPI interfaces, relating to IORT table.
