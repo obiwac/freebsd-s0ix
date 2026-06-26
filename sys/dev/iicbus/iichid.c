@@ -61,7 +61,6 @@
 #include <dev/iicbus/iiconf.h>
 
 #include "hid_if.h"
-#include "gpio_intr_if.h"
 
 #ifdef IICHID_DEBUG
 static int iichid_debug = 0;
@@ -1125,6 +1124,48 @@ done:
 	return (sc->probe_result);
 }
 
+static void
+iichid_setup_cousin_intr(device_t dev)
+{
+	struct iichid_softc *sc = device_get_softc(dev);
+
+	device_printf(dev, "Using cousin interrupt source\n");
+#ifdef IICHID_SAMPLING
+	sc->sampling_rate_slow = -1;
+#endif
+}
+
+static void
+iichid_cousin_intr(device_t dev)
+{
+	iichid_intr(device_get_softc(dev));
+}
+
+static void
+iichid_detach_cousin_intr(device_t dev)
+{
+	struct iichid_softc *sc = device_get_softc(dev);
+	device_t intr_src;
+
+	device_printf(dev, "Sibling interrupt source detached; making "
+	    "new request\n");
+	intr_src = acpi_cousin_intr_req(dev, iichid_setup_cousin_intr,
+	    iichid_detach_cousin_intr, iichid_cousin_intr);
+
+	// TODO We should make sure we still use sampling if the user explcitly sets the sampling rate sysctls.
+
+	if (intr_src != NULL)
+		panic("acpi_cousin_intr_req() should always return "
+		    "NULL at the moment");
+#ifdef IICHID_SAMPLING
+	else {
+		device_printf(sc->dev,
+		    "Using sampling mode\n");
+		sc->sampling_rate_slow = IICHID_SAMPLING_RATE_SLOW;
+	}
+#endif
+}
+
 static int
 iichid_attach(device_t dev)
 {
@@ -1155,7 +1196,6 @@ iichid_attach(device_t dev)
 	sc->sampling_hysteresis = IICHID_SAMPLING_HYSTERESIS;
 	sc->dup_buf = malloc(sc->intr_bufsize, M_DEVBUF, M_WAITOK | M_ZERO);
 #endif
-
 	sc->irq_rid = 0;
 	sc->irq_res = bus_alloc_resource_any(sc->dev, SYS_RES_IRQ,
 	    &sc->irq_rid, RF_ACTIVE);
@@ -1172,15 +1212,23 @@ iichid_attach(device_t dev)
 		if (sc->irq_res != NULL)
 			bus_release_resource(dev, SYS_RES_IRQ, sc->irq_rid,
 			    sc->irq_res);
+		device_t intr_src = acpi_cousin_intr_req(dev,
+		    iichid_setup_cousin_intr, iichid_detach_cousin_intr,
+		    iichid_cousin_intr);
+		if (intr_src != NULL)
+			panic("acpi_cousin_intr_req() should always return "
+			    "NULL at the moment");
+		else {
 #ifdef IICHID_SAMPLING
-		device_printf(sc->dev,
-		    "Using sampling mode\n");
-		sc->sampling_rate_slow = IICHID_SAMPLING_RATE_SLOW;
+			device_printf(sc->dev,
+			    "Using sampling mode\n");
+			sc->sampling_rate_slow = IICHID_SAMPLING_RATE_SLOW;
 #else
-		iichid_detach(dev);
-		error = ENXIO;
-		goto done;
+			iichid_detach(dev);
+			error = ENXIO;
+			goto done;
 #endif
+		}
 	}
 
 #ifdef IICHID_SAMPLING
@@ -1281,29 +1329,6 @@ iichid_detach(device_t dev)
 	return (0);
 }
 
-static int
-iichid_gpio_intr_give(device_t dev, device_t intr_dev,
-    struct resource *intr_res)
-{
-	struct iichid_softc *sc = device_get_softc(dev);
-	int err;
-
-	sc->irq_dev = intr_dev;
-	sc->irq_res = intr_res;
-	sc->irq_rid = rman_get_rid(intr_res);
-
-	err = iichid_setup_interrupt(sc);
-	if (err != 0) {
-		device_printf(dev, "Could not setup interrupt handler for "
-		    "given GPIO interrupt: %d\n", err);
-		sc->irq_res = NULL;
-		return (err);
-	}
-	device_printf(dev, "Using GPIO interrupt\n");
-	sc->sampling_rate_slow = 0;
-	return (0);
-}
-
 static void
 iichid_suspend_task(void *context, int pending)
 {
@@ -1399,9 +1424,6 @@ static device_method_t iichid_methods[] = {
 	DEVMETHOD(hid_set_idle,		iichid_set_idle),
 	DEVMETHOD(hid_set_protocol,	iichid_set_protocol),
 	DEVMETHOD(hid_ioctl,		iichid_ioctl),
-
-	/* GPIO interrupt consumer interface */
-	DEVMETHOD(gpio_intr_give,	iichid_gpio_intr_give),
 
 	DEVMETHOD_END
 };
