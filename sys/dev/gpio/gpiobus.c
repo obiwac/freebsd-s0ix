@@ -1568,12 +1568,8 @@ gpiopic_add_handler(const char *name, struct gpiopic *gpiopic, uint32_t pin,
 	}
 	return (err);
 }
-int
-gpiobus_setup_intr(device_t bus, device_t dev, struct resource *irq,
-		 int flags, driver_filter_t filter, void (*ihand)(void *),
-		 void *arg, void **cookiep);
 
-int
+static int
 gpiobus_setup_intr(device_t bus, device_t dev, struct resource *irq,
 		 int flags, driver_filter_t filter, void (*ihand)(void *),
 		 void *arg, void **cookiep)
