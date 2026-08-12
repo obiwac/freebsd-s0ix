@@ -64,7 +64,7 @@ struct tb_cfg_read_resp {
 struct tb_cfg_write {
 	tb_route_t			route;
 	uint32_t			addr_attrs;
-	uint32_t			data[0];	/* Up to 60 dwords */
+	uint32_t			data[0];
 	/* uint32_t crc is at the end */
 } __packed;
 
