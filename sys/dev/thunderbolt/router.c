@@ -63,7 +63,11 @@ static void router_free_cmd(struct router_softc *, struct router_command *);
 static int _tb_router_attach(struct router_softc *);
 static void router_prepare_read(struct router_softc *, struct router_command *,
     int);
+static void router_prepare_write(struct router_softc *, struct router_command *,
+    int);
 static int _tb_config_read(struct router_softc *, u_int, u_int, u_int, u_int,
+    uint32_t *, void *, struct router_command **);
+static int _tb_config_write(struct router_softc *, u_int, u_int, u_int, u_int,
     uint32_t *, void *, struct router_command **);
 static int router_schedule(struct router_softc *, struct router_command *);
 static int router_schedule_locked(struct router_softc *,
@@ -246,6 +250,7 @@ tb_router_attach_root(struct nhi_softc *nsc, tb_route_t route)
 	sc->ring0 = nsc->ring0;
 	sc->route = route;
 	sc->nsc = nsc;
+	sc->suspended = false;
 
 	mtx_init(&sc->mtx, "tbcfg", "Thunderbolt Router Config", MTX_DEF);
 	TAILQ_INIT(&sc->cmd_queue);
@@ -336,6 +341,90 @@ tb_router_detach(struct router_softc *sc)
 	if (sc != NULL)
 		free(sc, M_THUNDERBOLT);
 
+	return (0);
+}
+
+int
+tb_router_suspend(struct router_softc *sc)
+{
+	int		err;
+	uint32_t	reg;
+
+	tb_debug(sc, DBG_ROUTER|DBG_EXTRA, "%s called\n", __func__);
+	if (sc->suspended) {
+		tb_debug(sc, DBG_ROUTER|DBG_EXTRA, "Already suspended\n");
+		return (0);
+	}
+
+	/*
+	 * TODO Before we do anything, we've first got to make sure that the
+	 * USB3 hub is in the U3 state, and the PCIe endpoint is in D3.
+	 *
+	 * Also check for "USB4 Port is Configured" to know if we support
+	 * sleep state.
+	 */
+
+	/* First, we've got to set ROUTER_CS_5.SLP (enter sleep). */
+	err = tb_config_router_read(sc, ROUTER_CS_5, 1, &reg);
+	if (err != 0) {
+		tb_debug(sc, DBG_ROUTER, "Cannot read ROUTER_CS5\n");
+		return (err);
+	}
+	/*
+	 * We want to set the enter sleep bit, as well as preventing wake
+	 * events from:
+	 * - Wake on PCIe (WoP).
+	 * - Wake on USB3 (WoU).
+	 * - Wake on DisplayPort (WoD).
+	 */
+	reg |= ROUTER_SLP;
+	reg &= ~(ROUTER_WOP | ROUTER_WOU | ROUTER_WOD);
+	err = tb_config_router_write(sc, ROUTER_CS_5, 1, &reg);
+	if (err != 0) {
+		tb_debug(sc, DBG_ROUTER, "Cannot write to ROUTER_CS5\n");
+		return (err);
+	}
+
+	/*
+	 * The ROUTER_CS_6.SLPR (sleep ready) bit should be set tSetSR after
+	 * we set the SLP bit.  Poll for it to be set.
+	 *
+	 * TODO On a v2 router, we should wait for the ROP_CMPLT notification,
+	 * but in the meantime just polling is also valid.
+	 */
+	pause_sbt("tbrouter", ustosbt(NHI_SLPR_WAIT_US), 0, C_HARDCLOCK);
+	err = tb_config_router_read(sc, ROUTER_CS_6, 1, &reg);
+	if (err != 0) {
+		tb_debug(sc, DBG_ROUTER, "Cannot read ROUTER_CS6\n");
+		return (err);
+	}
+	if ((reg & ROUTER_SLPR) != 0)
+		goto ready;
+	tb_printf(sc, "Sleep ready bit not set after 50 ms after "
+	    "asking to enter sleep, waiting...\n");
+	for (size_t i = 0; i < NHI_SLPR_WAIT_MAX; i++) {
+		pause_sbt("tbrouter", ustosbt(NHI_SLPR_WAIT_US), 0,
+		    C_HARDCLOCK);
+		err = tb_config_router_read(sc, ROUTER_CS_6, 1, &reg);
+		if (err != 0) {
+			tb_debug(sc, DBG_ROUTER, "Cannot read ROUTER_CS6\n");
+			return (err);
+		}
+		if ((reg & ROUTER_SLPR) != 0)
+			goto ready;
+	}
+	tb_printf(sc, "Timed out waiting for the sleep ready bit to be"
+	    "set\n");
+	return (ETIMEDOUT);
+
+ready:
+	tb_printf(sc, "Ready to enter sleep\n");
+	sc->suspended = true;
+	/*
+	 * TODO We must tell the host router to send LT_LRoff on the sideband
+	 * channel of each DFP.  (I thought we weren't allowed to send anything
+	 * on the sideband channel after setting the sleep entry bit?)
+	 */
 	return (0);
 }
 
@@ -492,8 +581,64 @@ int
 tb_config_write(struct router_softc *sc, u_int space, u_int adapter,
     u_int offset, u_int dwlen, uint32_t *buf)
 {
+	struct router_command *cmd;
+	int error, retries;
 
-	return(0);
+	if ((error = _tb_config_write(sc, space, adapter, offset, dwlen, buf,
+	    router_get_config_cb, &cmd)) != 0)
+		return (error);
+
+	retries = cmd->retries;
+	mtx_lock(&sc->mtx);
+	while (retries-- >= 0) {
+		error = router_schedule_locked(sc, cmd);
+		if (error)
+			break;
+
+		error = msleep(cmd, &sc->mtx, 0, "tbtcfg", cmd->timeout * hz);
+		if (error != EWOULDBLOCK)
+			break;
+		sc->inflight_cmd = NULL;
+		tb_debug(sc, DBG_ROUTER, "Config command timed out, "
+		    "retries=%d\n", retries);
+	}
+
+	if (cmd->ev != 0)
+		error = EINVAL;
+	router_free_cmd(sc, cmd);
+	mtx_unlock(&sc->mtx);
+	return (error);
+}
+
+static int
+_tb_config_write(struct router_softc *sc, u_int space, u_int adapter,
+    u_int offset, u_int dwlen, uint32_t *buf, void *cb,
+    struct router_command **rcmd)
+{
+	struct router_command *cmd;
+	struct tb_cfg_write *msg;
+	size_t msglen = sizeof(*msg) + dwlen * 4;
+	int error;
+
+	if ((error = router_alloc_cmd(sc, &cmd)) != 0)
+		return (error);
+
+	msg = router_get_frame_data(cmd);
+	bzero(msg, msglen);
+	msg->route.hi = sc->route.hi;
+	msg->route.lo = sc->route.lo;
+	msg->addr_attrs = TB_CONFIG_ADDR(0, space, adapter, dwlen, offset);
+	for (size_t i = 0; i < dwlen; i++)
+		msg->data[i] = buf[i];
+	cmd->callback = cb;
+	cmd->callback_arg = buf;
+	cmd->dwlen = dwlen;
+	router_prepare_write(sc, cmd, msglen);
+
+	if (rcmd != NULL)
+		*rcmd = cmd;
+
+	return (0);
 }
 
 static int
@@ -564,6 +709,41 @@ router_prepare_read(struct router_softc *sc, struct router_command *cmd,
 	msg[msglen] = htobe32(tb_calc_crc(nhicmd->data, len-4));
 
 	nhicmd->pdf = PDF_READ;
+	nhicmd->req_len = len;
+
+	nhicmd->timeout = NHI_CMD_TIMEOUT;
+	nhicmd->retries = 0;
+	nhicmd->resp_buffer = (uint32_t *)cmd->resp_buffer;
+	nhicmd->resp_len = (cmd->dwlen + 3) * 4;
+	nhicmd->context = cmd;
+
+	cmd->retries = CFG_DEFAULT_RETRIES;
+	cmd->timeout = CFG_DEFAULT_TIMEOUT;
+
+	return;
+}
+
+static void
+router_prepare_write(struct router_softc *sc, struct router_command *cmd,
+    int len)
+{
+	struct nhi_cmd_frame *nhicmd;
+	uint32_t *msg;
+	int msglen, i;
+
+	KASSERT(cmd != NULL, ("cmd cannot be NULL\n"));
+	KASSERT(len != 0, ("Invalid zero-length command\n"));
+	KASSERT(len % 4 == 0, ("Message must be 32bit padded\n"));
+
+	nhicmd = cmd->nhicmd;
+	msglen = (len - 4) / 4;
+	for (i = 0; i < msglen; i++)
+		nhicmd->data[i] = htobe32(nhicmd->data[i]);
+
+	msg = (uint32_t *)nhicmd->data;
+	msg[msglen] = htobe32(tb_calc_crc(nhicmd->data, len-4));
+
+	nhicmd->pdf = PDF_WRITE;
 	nhicmd->req_len = len;
 
 	nhicmd->timeout = NHI_CMD_TIMEOUT;
