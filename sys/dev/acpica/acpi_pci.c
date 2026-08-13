@@ -313,15 +313,43 @@ acpi_pci_set_powerstate_method(device_t dev, device_t child, int state)
 			goto out;
 	}
 	h = acpi_get_handle(child);
-	status = acpi_pwr_switch_consumer(h, state);
+
+	/*
+	 * Determine the ACPI D-state to use.  For S0ix (suspend-to-idle), if
+	 * the device declares _S0W == ACPI_STATE_D3_COLD (4), use D3cold rather
+	 * than D3hot.  D3cold specifies no power resources in its resource list,
+	 * so shared power resources (where _PR0 == _PR3, as on many NVMe slots)
+	 * have their reference count drop to zero and their _OFF method is
+	 * invoked.  This allows _ON to run correctly on resume, which deasserts
+	 * PERST# and waits for PCIe link training to complete.
+	 *
+	 * Without this, the platform physically cuts NVMe power during S0i3
+	 * while FreeBSD thinks P0NV is still on (ref count never reached zero),
+	 * so _ON is never called on resume and the device remains inaccessible.
+	 */
+	int acpi_state = state;
+	if (state == PCI_POWERSTATE_D3 && h != NULL) {
+		device_t acpi_dev = devclass_get_device(devclass_find("acpi"), 0);
+		if (acpi_dev != NULL) {
+			struct acpi_softc *acpi_sc = device_get_softc(acpi_dev);
+			if (acpi_sc->acpi_stype == POWER_STYPE_SUSPEND_TO_IDLE) {
+				UINT32 s0w;
+				if (ACPI_SUCCESS(acpi_GetInteger(h, "_S0W", &s0w)) &&
+				    s0w == ACPI_STATE_D3_COLD)
+					acpi_state = ACPI_STATE_D3_COLD;
+			}
+		}
+	}
+
+	status = acpi_pwr_switch_consumer(h, acpi_state);
 	if (ACPI_SUCCESS(status)) {
 		if (bootverbose)
 			device_printf(dev, "set ACPI power state %s on %s\n",
-			    acpi_d_state_to_str(state), acpi_name(h));
+			    acpi_d_state_to_str(acpi_state), acpi_name(h));
 	} else if (status != AE_NOT_FOUND)
 		device_printf(dev,
 		    "failed to set ACPI power state %s on %s: %s\n",
-		    acpi_d_state_to_str(state), acpi_name(h),
+		    acpi_d_state_to_str(acpi_state), acpi_name(h),
 		    AcpiFormatException(status));
 	if (old_state > state && pci_do_power_resume)
 		error = pci_set_powerstate_method(dev, child, state);
