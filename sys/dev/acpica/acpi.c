@@ -4164,16 +4164,13 @@ acpi_system_eventhandler_wakeup(struct acpi_softc *const sc,
 }
 
 /*
- * Grace window after wakeup during which a power/sleep button press for suspend
- * is ignored.  Some firmware wrongly reports the depress that caused the wakeup
- * as an "S0 Power/Sleep Button Pressed" notify (value 0x80) instead of the
- * spec-required "Device Wake" notify (0x02); honoring it re-enters sleep
- * immediately after resume.  On the Framework Laptop 12 the replayed event
- * arrives within ~620 ms of the recorded resume time, so a one-second window
- * was chosen.  See https://bugs.freebsd.org/296243 for the traces, timing
- * data, and analysis.
+ * After wakeup, ignore power/sleep button suspend for a bit. Framework EC
+ * quirk: power button performs Notify 0x80 instead of 0x02, so machine sleeps
+ * again. Framework Laptop 12 + i915kms notifies ~620ms after wake, meanwhile
+ * no KMS notifies >1s. Inside of ACPI_MINIMUM_AWAKETIME seconds, ignore
+ * notification. See https://bugs.freebsd.org/296243
  */
-#define	ACPI_BUTTON_REPLAY_WINDOW	SBT_1S
+#define	ACPI_BUTTON_REPLAY_WINDOW	(SBT_1S * ACPI_MINIMUM_AWAKETIME)
 
 static bool
 acpi_button_resume_replay(struct acpi_softc *sc, const char *which)
