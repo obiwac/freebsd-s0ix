@@ -3906,6 +3906,17 @@ backout:
 
     EVENTHANDLER_INVOKE(power_resume, stype);
 
+    if (stype == POWER_STYPE_SUSPEND_TO_IDLE) {
+	devclass_t dc = devclass_find("amdsmu");
+
+	if (dc == NULL || devclass_get_count(dc) == 0) {
+	    device_printf(sc->acpi_dev,
+		"Resumed from suspend-to-idle but amdsmu(4) is not attached; "
+		"unable to verify S0i3 entry. It is unlikely the system "
+		"entered a deep sleep state.\n");
+	}
+    }
+
     /* Allow another sleep request after a while. */
     callout_schedule(&acpi_sleep_timer, hz * ACPI_MINIMUM_AWAKETIME);
 
