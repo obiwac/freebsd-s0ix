@@ -323,6 +323,7 @@ amdsmu_diagnose(device_t dev, enum power_stype stype)
 	struct amdsmu_softc *sc = device_get_softc(dev);
 	struct amdsmu_metrics *m = &sc->metrics;
 	bool any_blocking = false;
+	const struct amdsmu_diagnostics *d;
 
 	if (stype != POWER_STYPE_SUSPEND_TO_IDLE)
 		return;
@@ -356,6 +357,21 @@ amdsmu_diagnose(device_t dev, enum power_stype stype)
 		device_printf(dev, "  %s (active for %ju us)\n",
 		    sc->product->ip_blocks_names[i],
 		    (uintmax_t)m->ip_block_last_active_time[i]);
+
+		for (size_t j = 0; j < nitems(amdsmu_diagnostics); j++) {
+			d = &amdsmu_diagnostics[j];
+			if (strcmp(d->blocking_ip_block,
+			    sc->product->ip_blocks_names[i]) != 0)
+				continue;
+			if (d->ignore || d->expected_module == NULL)
+				break;
+			if (devclass_find(d->expected_module) != NULL)
+				break;
+			device_printf(dev,
+			    "    hint: load %s to allow this block "
+			    "to suspend\n", d->expected_module);
+			break;
+		}
 	}
 
 	if (!any_blocking)
