@@ -2508,9 +2508,7 @@ init_rtld(caddr_t mapbase, Elf_Auxinfo **aux_info)
 	objtmp.path = NULL;
 	objtmp.rtld = true;
 	objtmp.mapbase = mapbase;
-#ifdef PIC
 	objtmp.relocbase = mapbase;
-#endif
 
 	objtmp.dynamic = rtld_dynamic(&objtmp);
 	digest_dynamic1(&objtmp, 1, &dyn_rpath, &dyn_soname, &dyn_runpath);
@@ -5464,6 +5462,11 @@ unref_dag(Obj_Entry *root)
 
 /*
  * Common code for MD __tls_get_addr().
+ *
+ * The tcb->tcb_dtv data structure is thread-local.  The reason that
+ * the function needs to take the rtld_bind_lock exclusive (as opposed
+ * to only shared, to safely access obj_list in allocate_module_tls())
+ * is to protect the rtld_malloc data.
  */
 static void *
 tls_get_addr_slow(struct tcb *tcb, int index, size_t offset, bool locked)

@@ -170,6 +170,16 @@ const guid_t guid_null;
 
 enum system_states system_state = SYSTEM_RUNNING;
 
+struct task_struct *
+__lkpi_current(void)
+{
+	struct thread *td;
+
+	td = curthread;
+	linux_set_current(td);
+	return ((struct task_struct *)td->td_lkpi_task);
+}
+
 int
 panic_cmp(struct rb_node *one, struct rb_node *two)
 {
@@ -550,6 +560,8 @@ linux_cdev_pager_populate(vm_object_t vm_obj, vm_pindex_t pidx, int fault_type,
 		 */
 		*first = vmap->vm_pfn_first;
 		*last = *first + vmap->vm_pfn_count - 1;
+		MPASS(pidx >= *first);
+		MPASS(pidx <= *last);
 		err = VM_PAGER_OK;
 		break;
 	default:
@@ -1394,6 +1406,19 @@ linux_file_mmap_single(struct file *fp, const struct file_operations *fop,
 				error = ESTALE;
 				vm_no_fault = 1;
 			} else {
+				if (ptr->vm_start == vmap->vm_start &&
+				    ptr->vm_end <= vmap->vm_end) {
+					/*
+					 * Userspace wants to grow an existing
+					 * mapping. We already have a
+					 * `vm_object_t' for this mapping. We
+					 * just need to update the `struct
+					 * vm_area_struct` to have the correct
+					 * end address.
+					 */
+					ptr->vm_end = vmap->vm_end;
+				}
+
 				error = EEXIST;
 				vm_no_fault = (ptr->vm_ops->fault == NULL);
 			}

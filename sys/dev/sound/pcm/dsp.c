@@ -186,17 +186,27 @@ dsp_chn_alloc(struct snddev_info *d, struct pcm_channel **ch, int direction,
 	    (direction == PCMDIR_REC && d->flags & SD_F_RVCHANS);
 
 	*ch = NULL;
+
+	/*
+	 * Prefer an idle primary channel, so that devices which provide more
+	 * than one of them use them all, instead of stacking every client on
+	 * the first one.
+	 */
 	CHN_FOREACH(c, d, channels.pcm.primary) {
 		CHN_LOCK(c);
-		if (c->direction != direction) {
-			CHN_UNLOCK(c);
-			continue;
-		}
-		/* Find an available primary channel to use. */
-		if ((c->flags & CHN_F_BUSY) == 0 ||
-		    (vdir_enabled && (c->flags & CHN_F_HAS_VCHAN)))
+		if (c->direction == direction && (c->flags & CHN_F_BUSY) == 0)
 			break;
 		CHN_UNLOCK(c);
+	}
+	/* Fall back to sharing a primary channel that already has vchans. */
+	if (c == NULL && vdir_enabled) {
+		CHN_FOREACH(c, d, channels.pcm.primary) {
+			CHN_LOCK(c);
+			if (c->direction == direction &&
+			    (c->flags & CHN_F_HAS_VCHAN))
+				break;
+			CHN_UNLOCK(c);
+		}
 	}
 	if (c == NULL)
 		return (EBUSY);
@@ -2684,14 +2694,11 @@ dsp_oss_syncstart(int sg_id)
 	struct pcmchan_syncmember *sm, *sm_tmp;
 	struct pcmchan_syncgroup *sg;
 	struct pcm_channel *c;
-	int ret, needlocks;
+	int ret;
 
-	/* Get the synclists lock */
 	PCM_SG_LOCK();
-
 	do {
 		ret = 0;
-		needlocks = 0;
 
 		/* Search for syncgroup by ID */
 		SLIST_FOREACH(sg, &snd_pcm_syncgroups, link) {
@@ -2728,16 +2735,14 @@ dsp_oss_syncstart(int sg_id)
 				}
 
 				/** @todo Is PRIBIO correct/ */
-				ret = msleep(sm, &snd_pcm_syncgroups_mtx,
+				ret = msleep(sm, PCM_SG_LOCKPTR(),
 				    PRIBIO | PCATCH, "pcmsg", timo);
-				if (ret == EINTR || ret == ERESTART)
-					break;
-
-				needlocks = 1;
-				ret = 0; /* Assumes ret == EAGAIN... */
+				if (ret == EAGAIN)
+					ret = 0;
+				break;
 			}
 		}
-	} while (needlocks && ret == 0);
+	} while (ret == 0 && sm != NULL);
 
 	/* Proceed only if no errors encountered. */
 	if (ret == 0) {

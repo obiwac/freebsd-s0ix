@@ -209,6 +209,7 @@ tcp_usr_detach(struct socket *so)
 	    tp->t_state < TCPS_SYN_SENT,
 	    ("%s: inp %p not disconnected or embryonic", __func__, inp));
 
+	TCPSTATES_DEC(tp->t_state);
 	tcp_discardcb(tp);
 	in_pcbfree(inp);
 }
@@ -1592,7 +1593,6 @@ tcp_fill_info(const struct tcpcb *tp, struct tcp_info *ti)
  */
 #define INP_WLOCK_RECHECK_CLEANUP(inp, cleanup) do {			\
 	INP_WLOCK(inp);							\
-	tp = intotcpcb(inp);						\
 	if (tp->t_flags & TF_DISCONNECTED) {				\
 		INP_WUNLOCK(inp);					\
 		cleanup;						\
@@ -2401,7 +2401,6 @@ unlock_and_done:
 		break;
 
 	case SOPT_GET:
-		tp = intotcpcb(inp);
 		switch (sopt->sopt_name) {
 #if defined(IPSEC_SUPPORT) || defined(TCP_SIGNATURE)
 		case TCP_MD5SIG:

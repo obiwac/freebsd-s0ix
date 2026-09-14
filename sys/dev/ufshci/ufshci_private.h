@@ -326,6 +326,7 @@ struct ufshci_controller {
 	256 /* Some controllers have their LSDB and MCQS fields reset to 0. */
 
 	uint32_t ref_clk;
+	uint32_t hs_series;
 
 	struct cam_sim *ufshci_sim;
 	struct cam_path *ufshci_path;
@@ -409,7 +410,7 @@ struct ufshci_controller {
 	uint32_t max_tx_lanes;
 	uint32_t max_rx_lanes;
 
-	bool is_failed;
+	uint32_t is_failed;
 };
 
 #define ufshci_mmio_offsetof(reg) offsetof(struct ufshci_registers, reg)

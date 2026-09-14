@@ -1816,6 +1816,7 @@ dev/hid/hrfkill.c		optional hrfkill
 dev/hid/hsctrl.c		optional hsctrl
 dev/hid/ietp.c			optional ietp
 dev/hid/ps4dshock.c		optional ps4dshock
+dev/hid/ps5dsense.c		optional ps5dsense
 dev/hid/u2f.c			optional u2f
 dev/hid/xb360gp.c		optional xb360gp
 dev/hptiop/hptiop.c		optional hptiop scbus
@@ -2990,6 +2991,17 @@ dev/rtwn/rtl8192e/r92e_rom.c	optional rtwn
 dev/rtwn/rtl8192e/r92e_rx.c	optional rtwn
 dev/rtwn/rtl8192e/usb/r92eu_attach.c	optional rtwn_usb
 dev/rtwn/rtl8192e/usb/r92eu_init.c	optional rtwn_usb
+# RTL8723B
+dev/rtwn/rtl8723b/r23b_calib.c	optional rtwn
+dev/rtwn/rtl8723b/r23b_fw.c	optional rtwn
+dev/rtwn/rtl8723b/r23b_init.c	optional rtwn
+dev/rtwn/rtl8723b/r23b_led.c	optional rtwn
+dev/rtwn/rtl8723b/r23b_rf.c	optional rtwn
+dev/rtwn/rtl8723b/r23b_rom.c	optional rtwn
+dev/rtwn/rtl8723b/r23b_rx.c	optional rtwn
+dev/rtwn/rtl8723b/usb/r23bu_attach.c	optional rtwn_usb
+dev/rtwn/rtl8723b/usb/r23bu_init.c	optional rtwn_usb
+dev/rtwn/rtl8723b/usb/r23bu_rom.c	optional rtwn_usb
 # RTL8812A
 dev/rtwn/rtl8812a/r12a_beacon.c	optional rtwn
 dev/rtwn/rtl8812a/r12a_calib.c	optional rtwn
@@ -4729,6 +4741,8 @@ compat/linuxkpi/common/src/linux_kthread.c	optional compat_linuxkpi \
 	compile-with "${LINUXKPI_C}"
 compat/linuxkpi/common/src/linux_lock.c		optional compat_linuxkpi \
 	compile-with "${LINUXKPI_C}"
+compat/linuxkpi/common/src/linux_math.c		optional compat_linuxkpi \
+	compile-with "${LINUXKPI_C}"
 compat/linuxkpi/common/src/linux_mhi.c		optional compat_linuxkpi wlan \
 	compile-with "${LINUXKPI_C}"
 compat/linuxkpi/common/src/linux_netdev.c	optional compat_linuxkpi \
@@ -4760,6 +4774,8 @@ compat/linuxkpi/common/src/linux_siphash.c	optional compat_linuxkpi \
 compat/linuxkpi/common/src/linux_skbuff.c	optional compat_linuxkpi \
 	compile-with "${LINUXKPI_C}"
 compat/linuxkpi/common/src/linux_slab.c		optional compat_linuxkpi \
+	compile-with "${LINUXKPI_C}"
+compat/linuxkpi/common/src/linux_timesub.c	optional compat_linuxkpi \
 	compile-with "${LINUXKPI_C}"
 compat/linuxkpi/common/src/linux_usb.c		optional compat_linuxkpi usb \
 	compile-with "${LINUXKPI_C}"

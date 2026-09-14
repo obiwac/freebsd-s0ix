@@ -32,7 +32,7 @@
 .\"
 .\" * Other names and brands may be claimed as the property of others.
 .\"
-.Dd August 11, 2026
+.Dd August 30, 2026
 .Dt EM 4
 .Os
 .Sh NAME
@@ -40,27 +40,26 @@
 .Nm lem ,
 .Nm igb ,
 .Nm igbv
-.Nd "Intel(R) PRO/1000 Gigabit Ethernet adapter driver"
+.Nd Intel PRO/1000 Gigabit Ethernet adapter driver
 .Sh SYNOPSIS
-To compile this driver into the kernel,
-place the following lines in your
-kernel configuration file:
-.Bd -ragged -offset indent
-.Cd "device iflib"
-.Cd "device em"
-.Ed
+.Cd device iflib
+.Cd device em
+.Cd options PCI_IOV
 .Pp
-PF SR-IOV support additionally requires:
-.Bd -ragged -offset indent
-.Cd "options PCI_IOV"
-.Ed
-.Pp
-Alternatively, to load the driver as a
-module at boot time, place the following line in
+In
 .Xr loader.conf 5 :
-.Bd -literal -offset indent
-if_em_load="YES"
-.Ed
+.Cd hw.em.disable_crc_stripping
+.Cd hw.em.eee_setting
+.Cd hw.em.smart_pwr_down
+.Cd hw.em.sbp
+.Cd hw.em.rx_int_delay
+.Cd hw.em.rx_abs_int_delay
+.Cd hw.em.tx_int_delay
+.Cd hw.em.tx_abs_int_delay
+.Cd hw.em.max_interrupt_rate
+.Cd hw.em.enable_aim
+.Cd hw.em.rx_process_limit
+.Cd if_em_load="YES"
 .Sh DESCRIPTION
 The
 .Nm
@@ -93,6 +92,33 @@ interfaces.
 .Pp
 The driver supports Transmit/Receive checksum offload and Jumbo Frames
 on all but 82542-based adapters.
+.Pp
+Physical functions on supported boards and ports advertise one or more of the
+.Cm wol_magic ,
+.Cm wol_ucast ,
+and
+.Cm wol_mcast
+capabilities shown by
+.Xr ifconfig 8 .
+The available modes depend on the controller and board.
+The NVM APME setting normally selects whether magic-packet wake is enabled by
+default without hiding modes that the hardware and board support.
+Wake support can be restricted to particular ports on multi-port adapters and
+is not available on
+.Nm igbv
+virtual functions.
+Waking the system from an ACPI sleep state also requires enabling the
+corresponding device wake source when it is exposed, for example:
+.Bd -literal -offset indent
+sysctl dev.em.0.wake=1
+.Ed
+The
+.Xr ifconfig 8
+wake capabilities select the controller packet filters; they do not enable
+the ACPI wake source.
+On supported PCH controllers, suspend uses the PHY ultra-low-power mode when
+the selected wake filters permit it and preserves negotiated Energy Efficient
+Ethernet operation while the wake link remains active.
 .Pp
 Furthermore it supports TCP segmentation offload (TSO) on all adapters but
 those based on the 82542, 82543, 82544 and 82547 controller chips.
@@ -172,7 +198,7 @@ For more information on configuring this device, see
 .Xr ifconfig 8 .
 .Sh SR-IOV
 When the kernel is built with
-.Dv PCI_IOV ,
+.Cd PCI_IOV ,
 the
 .Nm igb
 PF driver supports SR-IOV on 82576 and I350 controllers.
@@ -480,7 +506,7 @@ the network connection (cable).
 .Sh SUPPORT
 For general information and support,
 go to the Intel support website at:
-.Pa http://support.intel.com .
+.Pa https://support.intel.com .
 .Pp
 If an issue is identified with the released source code on the supported kernel
 with a supported adapter, email the specific information related to the

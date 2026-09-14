@@ -53,6 +53,7 @@ MAN=	aac.4 \
 	${_amdsmn.4} \
 	${_amdsmu.4} \
 	${_amdtemp.4} \
+	${_apple_bce.4} \
 	${_bxe.4} \
 	${_aout.4} \
 	${_apic.4} \
@@ -262,6 +263,7 @@ MAN=	aac.4 \
 	${_imcsmb.4} \
 	inet.4 \
 	inet6.4 \
+	intel_pmc.4 \
 	intpm.4 \
 	intro.4 \
 	${_io.4} \
@@ -293,6 +295,7 @@ MAN=	aac.4 \
 	${_iwx.4} \
 	ix.4 \
 	ixl.4 \
+	ixv.4 \
 	jedec_dimm.4 \
 	jme.4 \
 	kbdmux.4 \
@@ -495,6 +498,7 @@ MAN=	aac.4 \
 	procfs.4 \
 	proto.4 \
 	ps4dshock.4 \
+	ps5dsense.4 \
 	psm.4 \
 	pst.4 \
 	pt.4 \
@@ -619,16 +623,20 @@ MAN=	aac.4 \
 	tun.4 \
 	tws.4 \
 	u2f.4 \
+	uart.4 \
 	udp.4 \
 	udplite.4 \
 	${_ufshci.4} \
 	unionfs.4 \
+	unix.4 \
 	ure.4 \
 	vale.4 \
+	veriexec.4 \
 	vga.4 \
 	vge.4 \
 	viapm.4 \
 	${_viawd.4} \
+	video.4 \
 	virtio.4 \
 	virtio_balloon.4 \
 	virtio_blk.4 \
@@ -744,6 +752,7 @@ MLINKS+=gem.4 if_gem.4
 MLINKS+=genet.4 if_genet.4
 MLINKS+=geneve.4 if_geneve.4
 MLINKS+=geom.4 GEOM.4
+MLINKS+=geom_zero.4 gzero.4
 MLINKS+=gif.4 if_gif.4
 MLINKS+=gpio.4 gpiobus.4
 MLINKS+=gpioths.4 dht11.4
@@ -769,6 +778,7 @@ MLINKS+=ix.4 if_ix.4
 MLINKS+=ix.4 if_ixgbe.4
 MLINKS+=ix.4 ixgbe.4
 MLINKS+=ixl.4 if_ixl.4
+MLINKS+=ixv.4 if_ixv.4
 MLINKS+=iavf.4 if_iavf.4
 MLINKS+=jme.4 if_jme.4
 MLINKS+=kue.4 if_kue.4
@@ -782,7 +792,8 @@ MLINKS+=me.4 if_me.4
 MLINKS+=mem.4 kmem.4
 MLINKS+=mfi.4 mfi_linux.4 \
 	mfi.4 mfip.4
-MLINKS+=mlx5en.4 mce.4
+MLINKS+=mlx5en.4 mce.4 \
+	mlx5en.4 if_mce.4
 MLINKS+=mos.4 if_mos.4
 MLINKS+=msdosfs.4 msdos.4
 MLINKS+=msk.4 if_msk.4
@@ -961,6 +972,10 @@ MLINKS+=sume.4 if_sume.4
 _bhyve.4=	bhyve.4
 _vmm.4=		vmm.4
 .endif
+
+.if ${MK_USB} != "no"
+_apple_bce.4=	apple_bce.4
+.endif
 .endif
 
 .if ${MACHINE_CPUARCH} == "amd64" || ${MACHINE_CPUARCH} == "aarch64"
@@ -1002,7 +1017,7 @@ MLINKS+=cgem.4 if_cgem.4
 .endif
 
 .if empty(MAN_ARCH) || ${MAN_ARCH} == "all"
-__arches=	${:!/bin/sh -c "/bin/ls -d ${.CURDIR}/man4.*"!:E}
+__arches=	${:!/bin/sh -c "echo ${.CURDIR}/man4.*"!:E}
 .else
 __arches=	${MAN_ARCH}
 .endif
@@ -1100,7 +1115,6 @@ MAN+=	\
 	runfw.4 \
 	u3g.4 \
 	uark.4 \
-	uart.4 \
 	uath.4 \
 	ubsa.4 \
 	ubser.4 \
@@ -1131,7 +1145,6 @@ MAN+=	\
 	umodem.4 \
 	umoscom.4 \
 	ums.4 \
-	unix.4 \
 	upgt.4 \
 	uplcom.4 \
 	ural.4 \
@@ -1147,11 +1160,8 @@ MAN+=	\
 	uvideo.4 \
 	uvisor.4 \
 	uvscom.4 \
-	veriexec.4 \
-	video.4 \
 	zyd.4
 
-MLINKS+=geom_zero.4 gzero.4
 MLINKS+=mtw.4 if_mtw.4
 MLINKS+=otus.4 if_otus.4
 MLINKS+=rsu.4 if_rsu.4

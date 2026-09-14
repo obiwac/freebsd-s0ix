@@ -165,6 +165,13 @@ struct v4l2_fract {
 	u_int32_t   denominator;
 };
 
+struct v4l2_rect {
+	int32_t		left;
+	int32_t		top;
+	u_int32_t	width;
+	u_int32_t	height;
+};
+
 struct v4l2_capability {
 	u_int8_t	driver[16];
 	u_int8_t	card[32];
@@ -228,11 +235,27 @@ struct v4l2_pix_format_mplane {
 	((type) == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE ||	\
 	 (type) == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE)
 
+struct v4l2_clip {
+	struct v4l2_rect	c;
+	struct v4l2_clip	*next;
+};
+
+struct v4l2_window {
+	struct v4l2_rect	w;
+	u_int32_t		field;
+	u_int32_t		chromakey;
+	struct v4l2_clip	*clips;
+	u_int32_t		clipcount;
+	void			*bitmap;
+	u_int8_t		global_alpha;
+};
+
 struct v4l2_format {
 	u_int32_t	type;
 	union {
 		struct v4l2_pix_format		pix;
 		struct v4l2_pix_format_mplane	pix_mp;
+		struct v4l2_window		win;
 		void				*_align;
 		u_int8_t			raw_data[200];
 	} fmt;
@@ -361,6 +384,28 @@ struct v4l2_queryctrl {
 	u_int32_t	reserved[2];
 };
 
+struct v4l2_querymenu {
+	u_int32_t	id;
+	u_int32_t	index;
+	union {
+		u_int8_t	name[32];
+		int64_t		value;
+	};
+	u_int32_t	reserved;
+} __packed;
+
+struct v4l2_cropcap {
+	u_int32_t		type;
+	struct v4l2_rect	bounds;
+	struct v4l2_rect	defrect;
+	struct v4l2_fract	pixelaspect;
+};
+
+struct v4l2_crop {
+	u_int32_t		type;
+	struct v4l2_rect	c;
+};
+
 struct v4l2_frmsize_discrete {
 	u_int32_t	width;		/* Frame width [pixel] */
 	u_int32_t	height;		/* Frame height [pixel] */
@@ -477,6 +522,7 @@ struct v4l2_frmivalenum {
  *  Capability flags
  */
 #define V4L2_CAP_VIDEO_CAPTURE		0x00000001
+#define V4L2_CAP_VIDEO_OUTPUT		0x00000002
 #define V4L2_CAP_VIDEO_CAPTURE_MPLANE	0x00001000
 #define V4L2_CAP_STREAMING		0x04000000
 #define V4L2_CAP_EXT_PIX_FORMAT		0x00200000
@@ -511,6 +557,7 @@ struct v4l2_frmivalenum {
 /*
  *  Input types
  */
+#define V4L2_INPUT_TYPE_TUNER		1
 #define V4L2_INPUT_TYPE_CAMERA		2
 
 /*
@@ -528,7 +575,9 @@ struct v4l2_frmivalenum {
  */
 #define V4L2_CTRL_CLASS_USER		0x00980000
 #define V4L2_CTRL_CLASS_MPEG		0x00990000
+#define V4L2_CTRL_CLASS_CAMERA		0x009a0000
 #define V4L2_CID_BASE			(V4L2_CTRL_CLASS_USER | 0x900)
+#define V4L2_CID_USER_CLASS		(V4L2_CTRL_CLASS_USER | 1)
 
 /*
  *  MPEG/codec control class
@@ -544,24 +593,64 @@ struct v4l2_frmivalenum {
 #define V4L2_CID_BLUE_BALANCE		(V4L2_CID_BASE + 15)
 #define V4L2_CID_GAMMA			(V4L2_CID_BASE + 16)
 #define V4L2_CID_GAIN			(V4L2_CID_BASE + 19)
+#define V4L2_CID_HFLIP			(V4L2_CID_BASE + 20)
+#define V4L2_CID_VFLIP			(V4L2_CID_BASE + 21)
 #define V4L2_CID_POWER_LINE_FREQUENCY	(V4L2_CID_BASE + 24)
+enum v4l2_power_line_frequency {
+	V4L2_CID_POWER_LINE_FREQUENCY_DISABLED	= 0,
+	V4L2_CID_POWER_LINE_FREQUENCY_50HZ	= 1,
+	V4L2_CID_POWER_LINE_FREQUENCY_60HZ	= 2,
+	V4L2_CID_POWER_LINE_FREQUENCY_AUTO	= 3,
+};
 #define V4L2_CID_HUE_AUTO		(V4L2_CID_BASE + 25)
 #define V4L2_CID_WHITE_BALANCE_TEMPERATURE (V4L2_CID_BASE + 26)
 #define V4L2_CID_SHARPNESS		(V4L2_CID_BASE + 27)
 #define V4L2_CID_BACKLIGHT_COMPENSATION	(V4L2_CID_BASE + 28)
+#define V4L2_CID_LASTP1			(V4L2_CID_BASE + 44)
 
-#define V4L2_CID_CAMERA_CLASS_BASE	0x009a0000
+#define V4L2_CID_CAMERA_CLASS_BASE	(V4L2_CTRL_CLASS_CAMERA | 0x900)
+#define V4L2_CID_CAMERA_CLASS		(V4L2_CTRL_CLASS_CAMERA | 1)
 #define V4L2_CID_EXPOSURE_AUTO		(V4L2_CID_CAMERA_CLASS_BASE + 1)
+enum v4l2_exposure_auto_type {
+	V4L2_EXPOSURE_AUTO		= 0,
+	V4L2_EXPOSURE_MANUAL		= 1,
+	V4L2_EXPOSURE_SHUTTER_PRIORITY	= 2,
+	V4L2_EXPOSURE_APERTURE_PRIORITY	= 3,
+};
 #define V4L2_CID_EXPOSURE_ABSOLUTE	(V4L2_CID_CAMERA_CLASS_BASE + 2)
 #define V4L2_CID_EXPOSURE_AUTO_PRIORITY	(V4L2_CID_CAMERA_CLASS_BASE + 3)
-#define V4L2_CID_FOCUS_ABSOLUTE		(V4L2_CID_CAMERA_CLASS_BASE + 4)
-#define V4L2_CID_FOCUS_RELATIVE		(V4L2_CID_CAMERA_CLASS_BASE + 5)
+#define V4L2_CID_PAN_RELATIVE		(V4L2_CID_CAMERA_CLASS_BASE + 4)
+#define V4L2_CID_TILT_RELATIVE		(V4L2_CID_CAMERA_CLASS_BASE + 5)
+#define V4L2_CID_PAN_RESET		(V4L2_CID_CAMERA_CLASS_BASE + 6)
+#define V4L2_CID_TILT_RESET		(V4L2_CID_CAMERA_CLASS_BASE + 7)
 #define V4L2_CID_PAN_ABSOLUTE		(V4L2_CID_CAMERA_CLASS_BASE + 8)
 #define V4L2_CID_TILT_ABSOLUTE		(V4L2_CID_CAMERA_CLASS_BASE + 9)
+#define V4L2_CID_FOCUS_ABSOLUTE		(V4L2_CID_CAMERA_CLASS_BASE + 10)
+#define V4L2_CID_FOCUS_RELATIVE		(V4L2_CID_CAMERA_CLASS_BASE + 11)
 #define V4L2_CID_FOCUS_AUTO		(V4L2_CID_CAMERA_CLASS_BASE + 12)
 #define V4L2_CID_ZOOM_ABSOLUTE		(V4L2_CID_CAMERA_CLASS_BASE + 13)
+#define V4L2_CID_ZOOM_RELATIVE		(V4L2_CID_CAMERA_CLASS_BASE + 14)
 #define V4L2_CID_ZOOM_CONTINUOUS	(V4L2_CID_CAMERA_CLASS_BASE + 15)
 #define V4L2_CID_PRIVACY		(V4L2_CID_CAMERA_CLASS_BASE + 16)
+#define V4L2_CID_IRIS_ABSOLUTE		(V4L2_CID_CAMERA_CLASS_BASE + 17)
+#define V4L2_CID_IRIS_RELATIVE		(V4L2_CID_CAMERA_CLASS_BASE + 18)
+
+/*
+ *  IDs reserved for driver specific controls
+ */
+#define V4L2_CID_PRIVATE_BASE		0x08000000
+
+/*
+ *  Control flags
+ */
+#define V4L2_CTRL_FLAG_DISABLED		0x0001
+#define V4L2_CTRL_FLAG_GRABBED		0x0002
+#define V4L2_CTRL_FLAG_READ_ONLY	0x0004
+#define V4L2_CTRL_FLAG_UPDATE		0x0008
+#define V4L2_CTRL_FLAG_INACTIVE		0x0010
+#define V4L2_CTRL_FLAG_SLIDER		0x0020
+#define V4L2_CTRL_FLAG_WRITE_ONLY	0x0040
+#define V4L2_CTRL_FLAG_VOLATILE		0x0080
 
 /*
  *  V4L2 ioctl definitions
@@ -585,8 +674,12 @@ struct v4l2_frmivalenum {
 #define VIDIOC_G_CTRL		_IOWR('V', 27, struct v4l2_control)
 #define VIDIOC_S_CTRL		_IOWR('V', 28, struct v4l2_control)
 #define VIDIOC_QUERYCTRL	_IOWR('V', 36, struct v4l2_queryctrl)
+#define VIDIOC_QUERYMENU	_IOWR('V', 37, struct v4l2_querymenu)
 #define VIDIOC_G_INPUT		_IOR('V', 38, int)
 #define VIDIOC_S_INPUT		_IOWR('V', 39, int)
+#define VIDIOC_CROPCAP		_IOWR('V', 58, struct v4l2_cropcap)
+#define VIDIOC_G_CROP		_IOWR('V', 59, struct v4l2_crop)
+#define VIDIOC_S_CROP		_IOW('V', 60, struct v4l2_crop)
 #define VIDIOC_G_PRIORITY	_IOR('V', 67, u_int32_t)
 #define VIDIOC_S_PRIORITY	_IOW('V', 68, u_int32_t)
 #define VIDIOC_TRY_FMT		_IOWR('V', 64, struct v4l2_format)
@@ -597,6 +690,9 @@ _Static_assert(sizeof(struct v4l2_pix_format) == 48, "v4l2_pix_format layout");
 _Static_assert(sizeof(struct v4l2_capability) == 104, "v4l2_capability layout");
 _Static_assert(sizeof(struct v4l2_requestbuffers) == 20,
     "v4l2_requestbuffers layout");
+_Static_assert(sizeof(struct v4l2_querymenu) == 44, "v4l2_querymenu layout");
+_Static_assert(sizeof(struct v4l2_cropcap) == 44, "v4l2_cropcap layout");
+_Static_assert(sizeof(struct v4l2_crop) == 20, "v4l2_crop layout");
 #ifdef __LP64__
 _Static_assert(__offsetof(struct v4l2_format, fmt) == 8, "v4l2_format layout");
 _Static_assert(sizeof(struct v4l2_format) == 208, "v4l2_format layout");

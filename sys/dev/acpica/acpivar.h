@@ -57,6 +57,7 @@ struct acpi_softc {
     enum power_stype	acpi_stype;
     int			acpi_sleep_disabled;
     sbintime_t		acpi_resume_sbt;	/* Uptime at last resume. */
+    bool		acpi_s2idle_wake;
 
     /* Supported sleep states and types. */
     bool		acpi_supported_stypes[POWER_STYPE_COUNT];
@@ -603,6 +604,9 @@ void		acpi_pxm_set_mem_locality(void);
 void		acpi_pxm_set_cpu_locality(void);
 int		acpi_pxm_get_cpu_locality(int apic_id);
 int		acpi_pxm_parse(device_t dev);
+int		acpi_get_cpus_for_domain(device_t dev, device_t child,
+		    int domain, enum cpu_sets op, size_t setsize,
+		    cpuset_t *cpuset);
 
 /*
  * Map a PXM to a VM domain.
@@ -637,6 +641,8 @@ int	acpi_iort_map_named_msi(const char *devname, u_int rid, u_int *xref,
 	    u_int *devid);
 int	acpi_iort_map_named_smmuv3(const char *devname, u_int rid,
 	    uint64_t *xref, u_int *devid);
+int	acpi_iort_lookup_its_from_iwb(device_t dev, int *its_id);
+device_t	acpi_iort_get_iwb_dev(int iwb_id);
 #endif
 #endif /* _KERNEL */
 #endif /* !_ACPIVAR_H_ */

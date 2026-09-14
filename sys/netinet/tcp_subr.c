@@ -2455,7 +2455,6 @@ tcp_discardcb(struct tcpcb *tp)
 		STAILQ_FOREACH_FROM_SAFE(m, &tp->t_inqueue, m_stailqpkt, prev)
 			m_freem(m);
 	}
-	TCPSTATES_DEC(tp->t_state);
 
 	if (tp->t_fb->tfb_tcp_fb_fini)
 		(*tp->t_fb->tfb_tcp_fb_fini)(tp, 1);
@@ -4295,6 +4294,9 @@ tcp_inptoxtp(const struct inpcb *inp, struct xtcpcb *xt)
 	bcopy(CC_ALGO(tp)->name, xt->xt_cc, TCP_CA_NAME_MAX);
 #ifdef TCP_BLACKBOX
 	(void)tcp_log_get_id(tp, xt->xt_logid);
+	xt->t_lognum = tp->t_lognum;
+	xt->t_loglimit = tp->t_loglimit;
+	xt->t_logsn = tp->t_logsn;
 #endif
 
 	xt->xt_len = sizeof(struct xtcpcb);

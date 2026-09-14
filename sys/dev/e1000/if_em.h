@@ -230,6 +230,11 @@ struct igb_vf_mac_filter;
  */
 #define EM_VENDOR_ID			0x8086
 #define EM_FLASH			0x0014
+#define EM_SUBVENDOR_DELL		0x1028
+#define EM_SUBVENDOR_HP			0x103c
+#define EM_I350_SUBDEVICE_WOL_1		0x1f52
+#define EM_I350_SUBDEVICE_WOL_2		0x5001
+#define EM_I350_SUBDEVICE_WOL_3		0x5002
 
 #define EM_JUMBO_PBA			0x00000028
 #define EM_DEFAULT_PBA			0x00000030
@@ -241,8 +246,8 @@ struct igb_vf_mac_filter;
 #define PCI_ANY_ID			(~0U)
 #define ETHER_ALIGN			2
 #define EM_FC_PAUSE_TIME		0x0680
-#define EM_EEPROM_APME			0x400;
-#define EM_82544_APME			0x0004;
+#define EM_EEPROM_APME_HIGH		0x0400
+#define EM_EEPROM_APME_LOW		0x0004
 
 /* Support AutoMediaDetect for Marvell M88 PHY in i354 */
 #define IGB_MEDIA_RESET		(1 << 0)
@@ -593,7 +598,9 @@ struct e1000_softc {
 
 	int			enable_aim;
 	/* Management and WOL features */
-	u32			wol;
+	bool			wol_phy_wakeup;
+	bool			wol_phy_armed;
+	bool			suspend_link_powered_down;
 	bool			has_manage;
 	bool			has_amt;
 
@@ -622,8 +629,35 @@ struct e1000_softc {
 	u32			pba;
 	int			link_mask;
 	int			tso_automasked;
+	u32			phy_hang_count;
 	u32			promisc_pending;
 	u32			stats_pending;
+	u32			device_reset_state;
+	u32			fatal_error_state;
+	u32			fatal_error_icr;
+	u32			fatal_error_pbeccsts;
+	u32			fatal_error_peind;
+	u32			fatal_error_pcie;
+	u32			fatal_error_pcie_ecc;
+	u32			fatal_error_lan;
+	u32			fatal_error_dma_tx;
+	u32			fatal_error_dma_rx;
+	u32			fatal_error_dma_host;
+	u64			fatal_error_reset_count;
+	u64			fatal_error_lan_count;
+	u64			fatal_error_mng_count;
+	u64			fatal_error_pcie_count;
+	u64			fatal_error_dma_count;
+	u64			fatal_error_unknown_count;
+	u64			corrected_error_dma_count;
+	u64			corrected_error_pcie_tx_data_count;
+	u64			corrected_error_pcie_retry_count;
+	u64			corrected_error_pcie_other_count;
+	u64			corrected_error_packet_buffer_count;
+	u64			corrected_error_lan_mng_fifo_count;
+	u64			uncorrected_error_packet_buffer_count;
+	u64			uncorrected_error_dma_count;
+	u64			uncorrected_error_pcie_count;
 
 #ifdef PCI_IOV
 	struct igb_vf		*vfs;
@@ -723,6 +757,7 @@ void	igbv_queue_retry_prepare(struct e1000_softc *);
 void	igbv_queue_retry_stop(struct e1000_softc *);
 void	igbv_reconcile_mac(struct e1000_softc *, if_t);
 bool	igbv_reset(if_ctx_t);
+bool	igbv_sanitize_queues(struct e1000_softc *);
 void	igbv_log_reset_failure(struct e1000_softc *, s32, bool);
 void	igbv_update_uc_addr_list(struct e1000_softc *, if_t);
 void	igbv_vlan_retry_add(struct e1000_softc *, u16);

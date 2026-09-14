@@ -658,26 +658,10 @@ pci_find_ext_capability(struct pci_dev *pdev, int capid)
 	return (reg);
 }
 
-#define	PCIM_PCAP_PME_SHIFT	11
 static __inline bool
-pci_pme_capable(struct pci_dev *pdev, uint32_t flag)
+pci_pme_capable(struct pci_dev *pdev, pci_power_t state)
 {
-	struct pci_devinfo *dinfo;
-	pcicfgregs *cfg;
-
-	if (flag > (PCIM_PCAP_D3PME_COLD >> PCIM_PCAP_PME_SHIFT))
-		return (false);
-
-	dinfo = device_get_ivars(pdev->dev.bsddev);
-	cfg = &dinfo->cfg;
-
-	if (cfg->pp.pp_cap == 0)
-		return (false);
-
-	if ((cfg->pp.pp_cap & (1 << (PCIM_PCAP_PME_SHIFT + flag))) != 0)
-		return (true);
-
-	return (false);
+	return (pci_has_pme(pdev->dev.bsddev, state));
 }
 
 static inline int
@@ -907,6 +891,11 @@ pci_reset_function(struct pci_dev *pdev)
 #define	pci_unmap_addr_set	dma_unmap_addr_set
 #define	pci_unmap_len		dma_unmap_len
 #define	pci_unmap_len_set	dma_unmap_len_set
+
+void *linuxkpi_pci_map_rom(struct pci_dev *pdev, size_t *size);
+void linuxkpi_pci_unmap_rom(struct pci_dev *pdev, void *rom);
+#define	pci_map_rom(pdev, size)		linuxkpi_pci_map_rom(pdev, size)
+#define	pci_unmap_rom(pdev, rom)	linuxkpi_pci_unmap_rom(pdev, rom)
 
 typedef unsigned int __bitwise pci_channel_state_t;
 typedef unsigned int __bitwise pci_ers_result_t;

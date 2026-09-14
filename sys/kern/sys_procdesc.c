@@ -665,6 +665,12 @@ pdopenpid1(struct thread *td, pid_t pid, struct procdesc **pdf, struct file *fp)
 		PROC_UNLOCK(p);
 		return (EBUSY);
 	}
+	error = p_canopen(td, p);
+	if (error != 0) {
+		PROC_UNLOCK(p);
+		return (error);
+	}
+
 	pd = p->p_procdesc;
 	if (pd != NULL) {
 		MPASS((p->p_zombieref & PZOMBIEREF_PROCDESC) != 0);
@@ -692,6 +698,7 @@ kern_pdopenpid(struct thread *td, pid_t pid, int flags)
 {
 	struct file *fp;
 	struct procdesc *pdf;
+	struct filecaps fcaps;
 	int error, fd, fflags;
 
 	error = falloc_noinstall(td, &fp);
@@ -701,13 +708,16 @@ kern_pdopenpid(struct thread *td, pid_t pid, int flags)
 	pdf = procdesc_alloc(flags);
 	if ((flags & PD_DAEMON) != 0)
 		fp->f_pdflags |= F_PD_NOKILL;
+	filecaps_fill(&fcaps);
+	if ((flags & PD_PTRACE_CAP) == 0)
+		cap_rights_clear(&fcaps.fc_rights, CAP_PTRACE);
 
 	sx_xlock(&proctree_lock);
 	error = pdopenpid1(td, pid, &pdf, fp);
 	sx_xunlock(&proctree_lock);
 
 	if (error == 0) {
-		error = finstall(td, fp, &fd, fflags, NULL);
+		error = finstall(td, fp, &fd, fflags, &fcaps);
 		if (error == 0) {
 			td->td_retval[0] = fd;
 		} else {
@@ -716,8 +726,12 @@ kern_pdopenpid(struct thread *td, pid_t pid, int flags)
 			 * return file descriptor to userspace.
 			 */
 			fp->f_pdflags |= F_PD_NOKILL | F_PD_NOFINSTALL;
+			filecaps_free(&fcaps);
 		}
+	} else if (IN_CAPABILITY_MODE(td)) {
+		error = ECAPMODE;
 	}
+
 	fdrop(fp, td);
 
 	if (pdf != NULL) {

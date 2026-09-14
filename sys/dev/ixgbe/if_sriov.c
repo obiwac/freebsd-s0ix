@@ -39,6 +39,8 @@
 #include <sys/iov.h>
 #include <sys/ktr.h>
 
+#include <net/if_vf_status.h>
+
 MALLOC_DEFINE(M_IXGBE_SRIOV, "ix_sriov", "ix SR-IOV allocations");
 
 #define IXGBE_VF_MBX_CLEANUP_GRACE	(2 * SBT_1S)
@@ -59,10 +61,12 @@ ixgbe_has_legacy_iov_recovery(const struct ixgbe_hw *hw)
  * ixgbe_define_iov_schemas
  ************************************************************************/
 void
-ixgbe_define_iov_schemas(device_t dev, int *error)
+ixgbe_define_iov_schemas(struct ixgbe_softc *sc, int *error)
 {
+	device_t dev;
 	nvlist_t *pf_schema, *vf_schema;
 
+	dev = sc->dev;
 	pf_schema = pci_iov_schema_alloc_node();
 	vf_schema = pci_iov_schema_alloc_node();
 	pci_iov_schema_add_unicast_mac(vf_schema, "mac-addr", 0, NULL);
@@ -78,6 +82,8 @@ ixgbe_define_iov_schemas(device_t dev, int *error)
 	if (*error != 0) {
 		device_printf(dev,
 		    "Error %d setting up SR-IOV\n", *error);
+	} else {
+		sc->iov_attached = true;
 	}
 } /* ixgbe_define_iov_schemas */
 
@@ -775,6 +781,8 @@ ixgbe_iov_recovery_task(void *context, int pending __unused)
 	int i, iov_pos, n, num_vfs = 0, recovery_vf;
 
 	ctx = context;
+	if (iflib_in_detach(ctx))
+		return;
 	sc = iflib_get_softc(ctx);
 	ctx_lock = iflib_ctx_lock_get(ctx);
 
@@ -1250,6 +1258,14 @@ static void
 ixgbe_vf_api_negotiate(struct ixgbe_softc *sc, struct ixgbe_vf *vf,
     uint32_t *msg)
 {
+	if (msg[1] == IXGBE_API_VER_1_6) {
+		if (sc->hw.mac.type != ixgbe_mac_E610)
+			goto failure;
+		vf->api_ver = msg[1];
+		ixgbe_send_vf_success(sc, vf, msg[0]);
+		return;
+	}
+
 	switch (msg[1]) {
 	case IXGBE_API_VER_1_0:
 	case IXGBE_API_VER_1_1:
@@ -1259,10 +1275,13 @@ ixgbe_vf_api_negotiate(struct ixgbe_softc *sc, struct ixgbe_vf *vf,
 		ixgbe_send_vf_success(sc, vf, msg[0]);
 		break;
 	default:
-		vf->api_ver = IXGBE_API_VER_UNKNOWN;
-		ixgbe_send_vf_failure(sc, vf, msg[0]);
-		break;
+		goto failure;
 	}
+	return;
+
+failure:
+	vf->api_ver = IXGBE_API_VER_UNKNOWN;
+	ixgbe_send_vf_failure(sc, vf, msg[0]);
 } /* ixgbe_vf_api_negotiate */
 
 static void
@@ -1280,6 +1299,7 @@ ixgbe_vf_update_xcast_mode(struct ixgbe_softc *sc, struct ixgbe_vf *vf,
 			goto failure;
 		break;
 	case IXGBE_API_VER_1_3:
+	case IXGBE_API_VER_1_6:
 		break;
 	default:
 		goto failure;
@@ -1336,6 +1356,43 @@ ixgbe_vf_get_queues(struct ixgbe_softc *sc, struct ixgbe_vf *vf,
 
 	ixgbe_write_mbx(hw, resp, IXGBE_VF_GET_QUEUES_RESP_LEN, vf->pool);
 } /* ixgbe_vf_get_queues */
+
+static void
+ixgbe_vf_get_link_state(struct ixgbe_softc *sc, struct ixgbe_vf *vf,
+    uint32_t *msg)
+{
+	switch (vf->api_ver) {
+	case IXGBE_API_VER_1_2:
+	case IXGBE_API_VER_1_3:
+	case IXGBE_API_VER_1_6:
+		break;
+	default:
+		ixgbe_send_vf_failure(sc, vf, msg[0]);
+		return;
+	}
+
+	msg[0] = IXGBE_VF_GET_LINK_STATE | IXGBE_VT_MSGTYPE_SUCCESS |
+	    IXGBE_VT_MSGTYPE_CTS;
+	msg[1] = 1;
+	ixgbe_write_mbx(&sc->hw, msg, 2, vf->pool);
+} /* ixgbe_vf_get_link_state */
+
+static void
+ixgbe_vf_get_pf_link_state(struct ixgbe_softc *sc, struct ixgbe_vf *vf,
+    uint32_t *msg)
+{
+	if (sc->hw.mac.type != ixgbe_mac_E610 ||
+	    vf->api_ver != IXGBE_API_VER_1_6) {
+		ixgbe_send_vf_failure(sc, vf, msg[0]);
+		return;
+	}
+
+	msg[0] = IXGBE_VF_GET_PF_LINK_STATE | IXGBE_VT_MSGTYPE_SUCCESS |
+	    IXGBE_VT_MSGTYPE_CTS;
+	msg[1] = sc->link_speed;
+	msg[2] = sc->link_up;
+	ixgbe_write_mbx(&sc->hw, msg, 3, vf->pool);
+} /* ixgbe_vf_get_pf_link_state */
 
 
 static bool
@@ -1406,6 +1463,12 @@ ixgbe_process_vf_msg(if_ctx_t ctx, struct ixgbe_vf *vf, bool reset_pending)
 		break;
 	case IXGBE_VF_UPDATE_XCAST_MODE:
 		ixgbe_vf_update_xcast_mode(sc, vf, msg);
+		break;
+	case IXGBE_VF_GET_LINK_STATE:
+		ixgbe_vf_get_link_state(sc, vf, msg);
+		break;
+	case IXGBE_VF_GET_PF_LINK_STATE:
+		ixgbe_vf_get_pf_link_state(sc, vf, msg);
 		break;
 	default:
 		ixgbe_send_vf_failure(sc, vf, msg[0]);
@@ -1686,6 +1749,101 @@ ixgbe_mbx_pending(struct ixgbe_softc *sc)
 	return (false);
 }
 
+static const char *
+ixgbe_vf_api_version(uint16_t api_ver)
+{
+	switch (api_ver) {
+	case ixgbe_mbox_api_10:
+		return ("1.0");
+	case ixgbe_mbox_api_11:
+		return ("1.1");
+	case ixgbe_mbox_api_12:
+		return ("1.2");
+	case ixgbe_mbox_api_13:
+		return ("1.3");
+	case ixgbe_mbox_api_14:
+		return ("1.4");
+	case ixgbe_mbox_api_15:
+		return ("1.5");
+	case ixgbe_mbox_api_16:
+		return ("1.6");
+	case ixgbe_mbox_api_20:
+		return ("2.0");
+	default:
+		return (NULL);
+	}
+}
+
+int
+ixgbe_if_vf_status(if_ctx_t ctx, struct if_vf_status **statusp)
+{
+	struct ixgbe_softc *sc;
+	struct ixgbe_vf *vf;
+	struct if_vf_info *info;
+	struct if_vf_status *status;
+	const char *api_ver;
+	int i;
+
+	sc = iflib_get_softc(ctx);
+	if (!sc->iov_attached)
+		return (EOPNOTSUPP);
+	status = if_vf_status_alloc(sc->num_vfs);
+	if (status == NULL)
+		return (ENOMEM);
+	for (i = 0; i < sc->num_vfs; i++) {
+		vf = &sc->vfs[i];
+		info = &status->vfs[i];
+		info->fields = IFVF_F_CONFIGURED | IFVF_F_INITIALIZED |
+		    IFVF_F_VLAN_MODE | IFVF_F_VLAN_COUNT |
+		    IFVF_F_NUM_TX_QUEUES | IFVF_F_NUM_RX_QUEUES |
+		    IFVF_F_ALLOW_SET_MAC |
+		    IFVF_F_ALLOW_SET_VLAN | IFVF_F_MAC_ANTI_SPOOF |
+		    IFVF_F_ALLOW_PROMISC | IFVF_F_TRAFFIC_ALLOWED |
+		    IFVF_F_FAULT_BLOCKED | IFVF_F_QUARANTINED;
+		info->index = i;
+		info->configured = (vf->flags & IXGBE_VF_ACTIVE) != 0;
+		info->initialized =
+		    (vf->flags & (IXGBE_VF_CTS | IXGBE_VF_INIT_DONE)) ==
+		    (IXGBE_VF_CTS | IXGBE_VF_INIT_DONE);
+		if (!ETHER_IS_ZERO(vf->ether_addr)) {
+			memcpy(info->mac, vf->ether_addr, sizeof(info->mac));
+			info->fields |= IFVF_F_MAC;
+		}
+		if (vf->default_vlan == 0)
+			info->vlan_mode = IFVF_VLAN_TRUNK;
+		else {
+			info->vlan_mode = IFVF_VLAN_ACCESS;
+			info->vlan = vf->default_vlan;
+			info->vlan_pcp = 0;
+			info->vlan_proto = ETHERTYPE_VLAN;
+			info->fields |= IFVF_F_VLAN | IFVF_F_VLAN_PCP |
+			    IFVF_F_VLAN_PROTO;
+		}
+		info->vlan_count = vf->num_vlans;
+		info->tx_queue_count = ixgbe_vf_queues(sc->iov_mode);
+		info->rx_queue_count = ixgbe_vf_queues(sc->iov_mode);
+		info->allow_set_mac = (vf->flags & IXGBE_VF_CAP_MAC) != 0;
+		info->allow_set_vlan = (vf->flags & IXGBE_VF_CAP_VLAN) != 0;
+		info->mac_anti_spoof =
+		    (vf->flags & IXGBE_VF_ANTI_SPOOF) != 0;
+		info->allow_promisc =
+		    (vf->flags & IXGBE_VF_ALLOW_PROMISC) != 0;
+		info->traffic_allowed = info->configured &&
+		    (vf->flags & IXGBE_VF_TRAFFIC_DISABLED) == 0;
+		info->fault_blocked =
+		    (vf->flags & IXGBE_VF_TRAFFIC_DISABLED) != 0;
+		info->quarantined = (vf->flags & IXGBE_VF_QUARANTINED) != 0;
+		api_ver = ixgbe_vf_api_version(vf->api_ver);
+		if (api_ver != NULL) {
+			strlcpy(info->api_version, api_ver,
+			    sizeof(info->api_version));
+			info->fields |= IFVF_F_API_VERSION;
+		}
+	}
+	*statusp = status;
+	return (0);
+}
+
 int
 ixgbe_iov_validate(struct ixgbe_softc *sc, u16 num_vfs)
 {
@@ -1760,6 +1918,8 @@ ixgbe_if_iov_init(if_ctx_t ctx, u16 num_vfs, const nvlist_t *config)
 		retval = ENOMEM;
 		goto err_init_iov;
 	}
+	for (i = 0; i < num_vfs; i++)
+		sc->vfs[i].api_ver = IXGBE_API_VER_UNKNOWN;
 	num_filters = sc->hw.mac.num_rar_entries - num_vfs - 1 -
 	    IXGBE_MAX_PF_MAC_FILTERS;
 	if (num_filters > 0) {

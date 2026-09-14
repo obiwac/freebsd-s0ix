@@ -3030,6 +3030,25 @@ pci_has_pm(device_t dev)
 	return (cfg->pp.pp_location != 0);
 }
 
+bool
+pci_has_pme(device_t dev, int state)
+{
+	static const uint16_t pme_mask[PCI_POWERSTATE_COUNT] = {
+		[PCI_POWERSTATE_D0] = PCIM_PCAP_D0PME,
+		[PCI_POWERSTATE_D1] = PCIM_PCAP_D1PME,
+		[PCI_POWERSTATE_D2] = PCIM_PCAP_D2PME,
+		[PCI_POWERSTATE_D3_HOT] = PCIM_PCAP_D3PME_HOT,
+		[PCI_POWERSTATE_D3_COLD] = PCIM_PCAP_D3PME_COLD,
+	};
+	struct pci_devinfo *dinfo = device_get_ivars(dev);
+	pcicfgregs *cfg = &dinfo->cfg;
+
+	if (state < PCI_POWERSTATE_D0 || state > PCI_POWERSTATE_MAX)
+		return (false);
+	return (cfg->pp.pp_location != 0 &&
+	    (cfg->pp.pp_cap & pme_mask[state]) != 0);
+}
+
 /*
  * Some convenience functions for PCI device drivers.
  */
@@ -4415,9 +4434,22 @@ pci_rescan_method(device_t dev)
 
 #ifdef PCI_IOV
 device_t
+pci_iov_get_pf(device_t dev)
+{
+	struct pci_devinfo *dinfo;
+
+	dinfo = device_get_ivars(dev);
+	if (dinfo == NULL || (dinfo->cfg.flags & PCICFG_VF) == 0 ||
+	    dinfo->cfg.iov == NULL)
+		return (NULL);
+	return (dinfo->cfg.iov->iov_pf);
+}
+
+device_t
 pci_add_iov_child(device_t bus, device_t pf, uint16_t rid, uint16_t vid,
     uint16_t did)
 {
+	struct pci_devinfo *pf_dinfo;
 	struct pci_devinfo *vf_dinfo;
 	device_t pcib;
 	int busno, slot, func;
@@ -4429,6 +4461,11 @@ pci_add_iov_child(device_t bus, device_t pf, uint16_t rid, uint16_t vid,
 	vf_dinfo = pci_fill_devinfo(pcib, bus, pci_get_domain(pcib), busno,
 	    slot, func, vid, did);
 
+	/* Make the VF-to-PF relationship available to child-added callbacks. */
+	pf_dinfo = device_get_ivars(pf);
+	KASSERT(pf_dinfo->cfg.iov != NULL,
+	    ("SR-IOV PF %s has no IOV state", device_get_nameunit(pf)));
+	vf_dinfo->cfg.iov = pf_dinfo->cfg.iov;
 	vf_dinfo->cfg.flags |= PCICFG_VF;
 	pci_add_child(bus, vf_dinfo);
 
@@ -4441,6 +4478,13 @@ pci_create_iov_child_method(device_t bus, device_t pf, uint16_t rid,
 {
 
 	return (pci_add_iov_child(bus, pf, rid, vid, did));
+}
+#else
+device_t
+pci_iov_get_pf(device_t dev __unused)
+{
+
+	return (NULL);
 }
 #endif
 
@@ -4487,6 +4531,13 @@ pcie_path_mps(device_t dev, uint16_t *mpsp)
 			break;
 		pcib = device_get_parent(bus);
 		if (pcib == NULL || !is_pci_device(pcib))
+			break;
+		/*
+		 * A PCI function may expose a host bridge for a synthetic PCI
+		 * domain.  Its Device Control belongs to the parent domain and
+		 * does not describe an upstream link in the synthetic hierarchy.
+		 */
+		if (pci_get_domain(pcib) != pci_get_domain(dev))
 			break;
 		dinfo = device_get_ivars(pcib);
 		if (dinfo->cfg.pcie.pcie_location != 0) {
@@ -4704,6 +4755,13 @@ pcie_reconcile_link_mps(device_t bus)
 		return;
 	pcib = device_get_parent(bus);
 	if (!is_pci_device(pcib))
+		return;
+	/*
+	 * A PCI function may provide a host bridge into a separate domain,
+	 * as Intel VMD does.  Do not treat the function's host-facing PCIe
+	 * Device Control as the upstream end of a link in the child domain.
+	 */
+	if (pci_get_domain(pcib) != pcib_get_domain(bus))
 		return;
 	upinfo = device_get_ivars(pcib);
 	if (upinfo->cfg.pcie.pcie_location == 0)
@@ -7065,6 +7123,28 @@ pcie_apei_error(device_t dev, int sev, uint8_t *aerp)
 }
 
 /*
+ * Return true if the device supports FLR, taking both its advertised
+ * capability and the PCI quirk policy into account.
+ */
+bool
+pcie_flr_supported(device_t dev)
+{
+	struct pci_devinfo *dinfo = device_get_ivars(dev);
+	int cap;
+
+	cap = dinfo->cfg.pcie.pcie_location;
+	if (cap == 0)
+		return (false);
+
+	if (!(pci_read_config(dev, cap + PCIER_DEVICE_CAP, 4) & PCIEM_CAP_FLR) &&
+	    !pci_has_quirk(pci_get_devid(dev), PCI_QUIRK_ENABLE_FLR))
+		return (false);
+	if (pci_has_quirk(pci_get_devid(dev), PCI_QUIRK_DISABLE_FLR))
+		return (false);
+	return (true);
+}
+
+/*
  * Perform a Function Level Reset (FLR) on a device.
  *
  * This function first waits for any pending transactions to complete
@@ -7088,15 +7168,10 @@ pcie_flr(device_t dev, u_int max_delay, bool force)
 	int compl_delay;
 	int cap;
 
-	cap = dinfo->cfg.pcie.pcie_location;
-	if (cap == 0)
+	if (!pcie_flr_supported(dev))
 		return (false);
 
-	if (!(pci_read_config(dev, cap + PCIER_DEVICE_CAP, 4) & PCIEM_CAP_FLR) &&
-	    !pci_has_quirk(pci_get_devid(dev), PCI_QUIRK_ENABLE_FLR))
-		return (false);
-	if (pci_has_quirk(pci_get_devid(dev), PCI_QUIRK_DISABLE_FLR))
-		return (false);
+	cap = dinfo->cfg.pcie.pcie_location;
 
 	/*
 	 * Disable busmastering to prevent generation of new

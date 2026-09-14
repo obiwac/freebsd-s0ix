@@ -144,6 +144,17 @@ ufshchi_sim_scsiio(struct cam_sim *sim, union ccb *ccb)
 	payload_len = csio->dxfer_len;
 	is_write = csio->ccb_h.flags & CAM_DIR_OUT;
 
+	if (csio->ccb_h.flags & CAM_CDB_POINTER)
+		cdb = csio->cdb_io.cdb_ptr;
+	else
+		cdb = csio->cdb_io.cdb_bytes;
+
+	if (cdb == NULL || csio->cdb_len > sizeof(upiu->cdb)) {
+		ccb->ccb_h.status = CAM_REQ_INVALID;
+		xpt_done(ccb);
+		return;
+	}
+
 	/* TODO: Check other data type */
 	if ((csio->ccb_h.flags & CAM_DATA_MASK) == CAM_DATA_BIO)
 		req = ufshci_allocate_request_bio((struct bio *)payload,
@@ -184,17 +195,6 @@ ufshchi_sim_scsiio(struct cam_sim *sim, union ccb *ccb)
 
 	upiu->expected_data_transfer_length = htobe32(payload_len);
 
-	if (csio->ccb_h.flags & CAM_CDB_POINTER)
-		cdb = csio->cdb_io.cdb_ptr;
-	else
-		cdb = csio->cdb_io.cdb_bytes;
-
-	if (cdb == NULL || csio->cdb_len > sizeof(upiu->cdb)) {
-		ccb->ccb_h.status = CAM_REQ_INVALID;
-		ufshci_free_request(req);
-		xpt_done(ccb);
-		return;
-	}
 	memcpy(upiu->cdb, cdb, csio->cdb_len);
 
 	ccb->ccb_h.status |= CAM_SIM_QUEUED;
@@ -271,7 +271,7 @@ ufshci_cam_action(struct cam_sim *sim, union ccb *ccb)
 		cpi->hba_misc = need_scan_wluns | PIM_UNMAPPED | PIM_NO_6_BYTE;
 		cpi->hba_eng_cnt = 0;
 		cpi->max_target = 0;
-		cpi->max_lun = ctrlr->max_lun_count;
+		cpi->max_lun = ctrlr->max_lun_count - 1;
 		cpi->async_flags = 0;
 		cpi->maxio = ctrlr->max_xfer_size;
 		cpi->initiator_id = 1;
@@ -453,6 +453,10 @@ ufshci_sim_find_periph(struct ufshci_controller *ctrlr, uint8_t wlun)
 	struct cam_periph *periph = NULL;
 	uint64_t scsi_lun;
 	uint64_t timeout;
+
+	/* The reset path can get here before the SIM is attached. */
+	if (ctrlr->ufshci_sim == NULL)
+		return (NULL);
 
 	scsi_lun = ufshci_sim_translate_ufs_to_scsi_lun(wlun);
 

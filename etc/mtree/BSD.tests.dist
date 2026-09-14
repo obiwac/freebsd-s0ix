@@ -491,7 +491,11 @@
         ..
         dhclient
         ..
+        fsck_msdosfs
+        ..
         growfs
+        ..
+        hastd
         ..
         ifconfig
         ..
@@ -824,6 +828,8 @@
         file
         ..
         fs
+            fdescfs
+            ..
             fusefs
             ..
             pjdfstest
@@ -868,6 +874,8 @@
                     ..
                 ..
                 virstor
+                ..
+                zoned
                 ..
             ..
         ..
@@ -1251,6 +1259,8 @@
         ..
         truncate
         ..
+        truss
+        ..
         tsort
         ..
         unifdef
@@ -1318,6 +1328,8 @@
         sysrc
         ..
         traceroute
+        ..
+        zonectl
         ..
     ..
 ..

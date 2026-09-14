@@ -217,7 +217,7 @@
 #define IXGBE_CAPS (IFCAP_HWCSUM | IFCAP_HWCSUM_IPV6 | IFCAP_TSO | \
 		    IFCAP_LRO | IFCAP_VLAN_HWTAGGING | IFCAP_VLAN_HWTSO | \
 		    IFCAP_VLAN_HWCSUM | IFCAP_JUMBO_MTU | IFCAP_VLAN_MTU | \
-		    IFCAP_VLAN_HWFILTER | IFCAP_WOL)
+		    IFCAP_VLAN_HWFILTER)
 
 #ifndef DEVMETHOD_END
 #define DEVMETHOD_END	{ NULL, NULL }
@@ -428,10 +428,13 @@ struct ixgbe_softc {
 	u32			vf_mbx_ready;
 	u32			vf_mbx_retry_pending;
 	u32			vf_vlan_retry_tick;
+	u32			vf_link_update;
 	u16			vf_vlan_retry_cursor;
 	u8			vf_mbx_retry_stage;
 	bool			vf_mbx_retry_initialized;
 	bool			vf_mcast_overflow_warned;
+	u8			vf_link_mbx_failures;
+	u8			vf_link_poll_tick;
 
 	/* Info about the interface */
 	int			advertise;	/* link speeds */
@@ -448,8 +451,7 @@ struct ixgbe_softc {
 	u32			ledctl_default;
 
 	/* Power management-related */
-	bool			wol_support;
-	u32			wufc;
+	u32			wol_filters;
 
 	/* Mbuf cluster size */
 	u32			rx_mbuf_sz;
@@ -482,6 +484,7 @@ struct ixgbe_softc {
 	struct ixgbe_vf		*vfs;
 	struct ixgbe_vf_mac_filter *vf_mac_filters;
 	int			num_vf_mac_filters;
+	bool			iov_attached;
 	bool			iov_mta_valid;
 	bool			iov_vfta_valid;
 	bool			iov_vlan_promisc;
@@ -502,6 +505,8 @@ struct ixgbe_softc {
 
 	/* Firmware error check */
 	int			recovery_mode;
+	u_int			fw_mode_timer_paused;
+	bool			fw_mode_timer_initialized;
 	bool			overtemp_shutdown_pending;
 	struct callout		fw_mode_timer;
 

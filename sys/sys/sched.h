@@ -144,6 +144,7 @@ struct thread *sched_choose(void);
 void	sched_clock(struct thread *td, int cnt);
 void	sched_idletd(void *);
 void	sched_preempt(struct thread *td);
+void	sched_do_idle(struct thread *td, bool do_idle);
 void	sched_relinquish(struct thread *td);
 void	sched_rem(struct thread *td);
 void	sched_wakeup(struct thread *td, int srqflags);
@@ -270,6 +271,13 @@ void schedinit_ap(void);
  */
 int sched_find_l2_neighbor(int cpu);
 
+/*
+ * The scheduler selection interface uses names that are reserved words in
+ * C++, causing problems for downstream projects that use C++ in the
+ * kernel.
+ */
+#ifndef __cplusplus
+
 struct sched_instance {
 	int	(*load)(void);
 	int	(*rr_interval)(void);
@@ -300,6 +308,7 @@ struct sched_instance {
 	void	(*clock)(struct thread *td, int cnt);
 	void	(*idletd)(void *);
 	void	(*preempt)(struct thread *td);
+	void	(*do_idle)(struct thread *td, bool do_idle);
 	void	(*relinquish)(struct thread *td);
 	void	(*rem)(struct thread *td);
 	void	(*wakeup)(struct thread *td, int srqflags);
@@ -334,6 +343,8 @@ struct sched_selection {
 
 void sched_instance_select(void);
 
+#endif /* !__cplusplus */
+
 #endif /* _KERNEL */
 
 /* POSIX 1003.1b Process Scheduling */
@@ -360,7 +371,7 @@ struct sched_param {
 #ifndef _PID_T_DECLARED
 typedef __pid_t         pid_t;
 #define _PID_T_DECLARED
-#endif
+#endif /* !_PID_T_DECLARED */
 
 __BEGIN_DECLS
 int     sched_get_priority_max(int);
@@ -373,5 +384,6 @@ int     sched_setscheduler(pid_t, int, const struct sched_param *);
 int     sched_yield(void);
 __END_DECLS
 
-#endif
+#endif /* !_KERNEL */
+
 #endif /* !_SCHED_H_ */

@@ -33,7 +33,8 @@ INCS=	a.out.h ar.h assert.h bitstring.h byteswap.h \
 	stddef.h stdnoreturn.h stdio.h stdlib.h string.h stringlist.h \
 	strings.h sysexits.h tar.h termios.h tgmath.h \
 	time.h timeconv.h timers.h ttyent.h \
-	uchar.h ulimit.h unistd.h utime.h utmpx.h uuid.h varargs.h \
+	uchar.h uexterror.h ulimit.h unistd.h utime.h utmpx.h uuid.h \
+	varargs.h \
 	wchar.h wctype.h wordexp.h xlocale.h
 
 .PATH: ${SRCTOP}/contrib/libc-vis
@@ -59,6 +60,7 @@ LSUBDIRS=	dev/acpica dev/agp dev/ciss dev/filemon dev/firewire \
 	geom/cache geom/concat geom/eli geom/gate geom/journal geom/label \
 	geom/mirror geom/mountver geom/multipath geom/nop \
 	geom/raid geom/raid3 geom/shsec geom/stripe geom/union geom/virstor \
+	geom/zoned \
 	net/altq \
 	net/route \
 	netgraph/netflow \

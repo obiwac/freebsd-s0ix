@@ -532,8 +532,14 @@ pmc_rapl_initialize(struct pmc_mdep *md, int maxcpu, int classindex)
 	}
 
 	/* Decode the energy unit. */
-	unit_val = rdmsr(unit_msr);
+	if (rdmsr_safe(unit_msr, &unit_val) != 0)
+		return (ENXIO);
 	esu = (unit_val >> 8) & 0x1f;
+
+	/* A zero unit is a hypervisor's answer for an MSR it does not have. */
+	if (esu == 0)
+		return (ENXIO);
+
 	dram_unit = rapl_intel_fixed_dram_unit() ? 16 : esu;
 
 	/* Build the event table from the MSRs that actually respond. */

@@ -151,6 +151,7 @@ int	 pdopenpid(pid_t, int);
 int	 pdwait(int, int *, int, struct __wrusage *, struct __siginfo *);
 int	 pddupfd(int, int, int);
 pid_t	 pdrfork_thread(int *, int, int, void *, int (*)(void *), void *);
+int	 pdptrace(int, int, int, void *, int);
 __END_DECLS
 
 #endif /* _KERNEL */
@@ -161,8 +162,10 @@ __END_DECLS
 #define	PD_DAEMON	0x00000001	/* Don't exit when procdesc closes. */
 #define	PD_CLOEXEC	0x00000002	/* Close file descriptor on exec. */
 #define	PD_NOWAITPID	0x00000004	/* Reap without waitpid(). */
+#define	PD_PTRACE_CAP	0x00000008	/* Allow PT_PROCDESC in cap mode. */
 
-#define	PD_ALLOWED_AT_FORK	(PD_DAEMON | PD_CLOEXEC | PD_NOWAITPID)
-#define	PD_ALLOWED_AT_OPENPID	(PD_DAEMON | PD_CLOEXEC)
+#define	PD_ALLOWED_AT_FORK	\
+    (PD_DAEMON | PD_CLOEXEC | PD_NOWAITPID | PD_PTRACE_CAP)
+#define	PD_ALLOWED_AT_OPENPID	(PD_DAEMON | PD_CLOEXEC | PD_PTRACE_CAP)
 
 #endif /* !_SYS_PROCDESC_H_ */

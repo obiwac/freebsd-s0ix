@@ -112,6 +112,13 @@ SYSCTL_INT(_hw_usb_uaudio, OID_AUTO, default_channels, CTLFLAG_RWTUN,
 #define	UAUDIO_BUFFER_MS_MIN	1
 #define	UAUDIO_BUFFER_MS_MAX	8
 
+/*
+ * The default monitor level is high enough that headsets with a hardware
+ * sidetone may emit immediate feedback upon attach.  We'll lower the default
+ * just for snd_uaudio(4) to avoid breaking others.
+ */
+#define	UAUDIO_DEFAULT_MONITOR	10
+
 static int
 uaudio_buffer_ms_sysctl(SYSCTL_HANDLER_ARGS)
 {
@@ -1199,6 +1206,8 @@ uaudio_attach_sub(device_t dev, kobj_class_t mixer_class, kobj_class_t chan_clas
 	}
 	if (mixer_init(dev, mixer_class, sc))
 		goto detach;
+	mix_set(sc->sc_child[i].mixer_dev, SOUND_MIXER_MONITOR,
+	    UAUDIO_DEFAULT_MONITOR, UAUDIO_DEFAULT_MONITOR);
 	sc->sc_child[i].mixer_init = 1;
 
 	mixer_hwvol_init(dev);
@@ -4688,7 +4697,16 @@ uaudio_mixer_determine_class(const struct uaudio_terminal_node *iot)
 
 	switch (match) {
 	case 0:	/* not connected to USB */
-		if (terminal_type_output != 0) {
+		/*
+		 * Some devices have a hardware sidetone that will show up here
+		 * as connecting the microphone to the speaker.  If we look at
+		 * the output first, then we are more likely to get a PCM type
+		 * and accidentally tie it to playback when we really should
+		 * treat it as a monitor control.
+		 */
+		if (terminal_type_input != 0 && terminal_type_output != 0) {
+			return (SOUND_MIXER_MONITOR);
+		} else if (terminal_type_output != 0) {
 			return (uaudio_mixer_get_feature_by_tt(
 			    terminal_type_output, SOUND_MIXER_MONITOR));
 		} else {
@@ -4747,7 +4765,16 @@ uaudio20_mixer_determine_class(const struct uaudio_terminal_node *iot)
 
 	switch (match) {
 	case 0:	/* not connected to USB */
-		if (terminal_type_output != 0) {
+		/*
+		 * Some devices have a hardware sidetone that will show up here
+		 * as connecting the microphone to the speaker.  If we look at
+		 * the output first, then we are more likely to get a PCM type
+		 * and accidentally tie it to playback when we really should
+		 * treat it as a monitor control.
+		 */
+		if (terminal_type_input != 0 && terminal_type_output != 0) {
+			return (SOUND_MIXER_MONITOR);
+		} else if (terminal_type_output != 0) {
 			return (uaudio_mixer_get_feature_by_tt(
 			    terminal_type_output, SOUND_MIXER_MONITOR));
 		} else {
@@ -5419,7 +5446,7 @@ uaudio20_set_speed(struct usb_device *udev, uint8_t iface_no,
     uint8_t clockid, uint32_t speed)
 {
 	struct usb_device_request req;
-	uint8_t data[4];
+	uDWord data;
 
 	DPRINTFN(6, "ifaceno=%d clockid=%d speed=%u\n",
 	    iface_no, clockid, speed);
@@ -5428,11 +5455,8 @@ uaudio20_set_speed(struct usb_device *udev, uint8_t iface_no,
 	req.bRequest = UA20_CS_CUR;
 	USETW2(req.wValue, UA20_CS_SAM_FREQ_CONTROL, 0);
 	USETW2(req.wIndex, clockid, iface_no);
-	USETW(req.wLength, 4);
-	data[0] = speed;
-	data[1] = speed >> 8;
-	data[2] = speed >> 16;
-	data[3] = speed >> 24;
+	USETW(req.wLength, sizeof(data));
+	USETDW(data, speed);
 
 	return (usbd_do_request(udev, NULL, &req, data));
 }

@@ -75,6 +75,7 @@
 #define IXGBE_API_VER_1_1	2
 #define IXGBE_API_VER_1_2	3
 #define IXGBE_API_VER_1_3	4
+#define IXGBE_API_VER_1_6	ixgbe_mbox_api_16
 #define IXGBE_API_VER_UNKNOWN	UINT16_MAX
 
 #define IXGBE_NO_VM             0
@@ -85,6 +86,8 @@
 
 int  ixgbe_if_iov_vf_add(if_ctx_t, u16, const nvlist_t *);
 int  ixgbe_if_iov_init(if_ctx_t, u16, const nvlist_t *);
+struct if_vf_status;
+int  ixgbe_if_vf_status(if_ctx_t, struct if_vf_status **);
 int  ixgbe_iov_validate(struct ixgbe_softc *, u16);
 void ixgbe_if_iov_uninit(if_ctx_t);
 void ixgbe_initialize_iov(struct ixgbe_softc *);
@@ -95,7 +98,7 @@ void ixgbe_ping_all_vfs(struct ixgbe_softc *);
 void ixgbe_init_iov_recovery(struct ixgbe_softc *);
 void ixgbe_schedule_iov_recovery(struct ixgbe_softc *);
 u_int ixgbe_iov_rebuild_mta(struct ixgbe_softc *);
-void ixgbe_define_iov_schemas(device_t, int *);
+void ixgbe_define_iov_schemas(struct ixgbe_softc *, int *);
 void ixgbe_align_all_queue_indices(struct ixgbe_softc *);
 int  ixgbe_vf_que_index(int, int, int);
 u32  ixgbe_get_mtqc(int);

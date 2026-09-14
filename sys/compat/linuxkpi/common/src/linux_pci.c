@@ -1663,6 +1663,33 @@ pci_device_is_present(struct pci_dev *pdev)
 	return (bus_child_present(dev));
 }
 
+void *
+linuxkpi_pci_map_rom(struct pci_dev *pdev, size_t *size)
+{
+	device_t dev;
+
+	dev = pdev->dev.bsddev;
+
+	if (pci_get_class(dev) != PCIC_DISPLAY &&
+	    (pci_get_class(dev) != PCIC_OLD ||
+	     pci_get_subclass(dev) != PCIS_OLD_VGA)) {
+		pr_debug("%s: TODO\n", __func__);
+		return (NULL);
+	}
+
+	return (vga_pci_map_bios(device_get_parent(dev), size));
+}
+
+void
+linuxkpi_pci_unmap_rom(struct pci_dev *pdev, void *rom)
+{
+	device_t dev;
+
+	dev = pdev->dev.bsddev;
+
+	vga_pci_unmap_bios(device_get_parent(dev), rom);
+}
+
 CTASSERT(sizeof(dma_addr_t) <= sizeof(uint64_t));
 
 struct linux_dma_obj {
@@ -1842,8 +1869,8 @@ lkpi_dma_unmap(struct device *dev, dma_addr_t dma_addr, size_t len,
 	/* dma_sync_single_for_cpu() unrolled to avoid lock recursicn. */
 	switch (direction) {
 	case DMA_BIDIRECTIONAL:
-		bus_dmamap_sync(obj->dmat, obj->dmamap, BUS_DMASYNC_POSTREAD);
-		bus_dmamap_sync(obj->dmat, obj->dmamap, BUS_DMASYNC_PREREAD);
+		bus_dmamap_sync(obj->dmat, obj->dmamap,
+		    BUS_DMASYNC_POSTREAD | BUS_DMASYNC_POSTWRITE);
 		break;
 	case DMA_TO_DEVICE:
 		bus_dmamap_sync(obj->dmat, obj->dmamap, BUS_DMASYNC_POSTWRITE);
@@ -2012,6 +2039,17 @@ linuxkpi_dma_sync(struct device *dev, dma_addr_t dma_addr, size_t size,
 	DMA_PRIV_UNLOCK(priv);
 }
 
+void
+lkpi_dma_sync_sg(struct device *dev, struct scatterlist *sgl, bus_dmasync_op_t op)
+{
+	struct linux_dma_priv *priv;
+
+	priv = dev->dma_priv;
+	DMA_PRIV_LOCK(priv);
+	bus_dmamap_sync(priv->dmat, sgl->dma_map, op);
+	DMA_PRIV_UNLOCK(priv);
+}
+
 int
 linux_dma_map_sg_attrs(struct device *dev, struct scatterlist *sgl, int nents,
     enum dma_data_direction direction, unsigned long attrs)
@@ -2046,6 +2084,7 @@ linux_dma_map_sg_attrs(struct device *dev, struct scatterlist *sgl, int nents,
 		    ("More than one segment (nseg=%d)", nseg + 1));
 
 		sg_dma_address(sg) = seg.ds_addr;
+		sg->dma_length = sg->length;
 	}
 
 	if ((attrs & DMA_ATTR_SKIP_CPU_SYNC) != 0)
@@ -2053,13 +2092,14 @@ linux_dma_map_sg_attrs(struct device *dev, struct scatterlist *sgl, int nents,
 
 	switch (direction) {
 	case DMA_BIDIRECTIONAL:
-		bus_dmamap_sync(priv->dmat, sgl->dma_map, BUS_DMASYNC_PREWRITE);
+		bus_dmamap_sync(priv->dmat, sgl->dma_map,
+		    BUS_DMASYNC_PREWRITE | BUS_DMASYNC_PREREAD);
 		break;
 	case DMA_TO_DEVICE:
-		bus_dmamap_sync(priv->dmat, sgl->dma_map, BUS_DMASYNC_PREREAD);
+		bus_dmamap_sync(priv->dmat, sgl->dma_map, BUS_DMASYNC_PREWRITE);
 		break;
 	case DMA_FROM_DEVICE:
-		bus_dmamap_sync(priv->dmat, sgl->dma_map, BUS_DMASYNC_PREWRITE);
+		bus_dmamap_sync(priv->dmat, sgl->dma_map, BUS_DMASYNC_PREREAD);
 		break;
 	default:
 		break;
@@ -2087,8 +2127,8 @@ linux_dma_unmap_sg_attrs(struct device *dev, struct scatterlist *sgl,
 
 	switch (direction) {
 	case DMA_BIDIRECTIONAL:
-		bus_dmamap_sync(priv->dmat, sgl->dma_map, BUS_DMASYNC_POSTREAD);
-		bus_dmamap_sync(priv->dmat, sgl->dma_map, BUS_DMASYNC_PREREAD);
+		bus_dmamap_sync(priv->dmat, sgl->dma_map,
+		    BUS_DMASYNC_POSTREAD | BUS_DMASYNC_POSTWRITE);
 		break;
 	case DMA_TO_DEVICE:
 		bus_dmamap_sync(priv->dmat, sgl->dma_map, BUS_DMASYNC_POSTWRITE);
