@@ -453,10 +453,22 @@ tb_router_resume(struct router_softc *sc)
 		return (0);
 	}
 
-	// TODO Reconfig.
-
 	sc->suspended = false;
 	return (0);
+}
+
+void
+tb_router_drain_commands(struct router_softc *sc)
+{
+	struct router_command *cmd;
+
+	mtx_lock(&sc->mtx);
+	sc->inflight_cmd = NULL;
+	while ((cmd = TAILQ_FIRST(&sc->cmd_queue)) != NULL) {
+		TAILQ_REMOVE(&sc->cmd_queue, cmd, link);
+		router_free_cmd(sc, cmd);
+	}
+	mtx_unlock(&sc->mtx);
 }
 
 static void
