@@ -396,8 +396,74 @@ nhi_suspend(struct nhi_softc *sc)
 int
 nhi_resume(struct nhi_softc *sc)
 {
-	/* TODO Not yet implemented. */
-	return (0);
+	struct nhi_ring_pair *r;
+	struct nhi_cmd_frame *cmd;
+	struct router_softc *rsc;
+	uint32_t val;
+	int i, error;
+
+	r = sc->ring0;
+	rsc = sc->root_rsc;
+
+	/*
+	 * Drain stale router command state.  After sleep, hardware will never
+	 * complete any in-flight or queued commands, so just throw them away.
+	 */
+	tb_router_drain_commands(rsc);
+
+	/* Reset the NHI hardware. */
+	error = nhi_reset(sc);
+	if (error != 0) {
+		tb_printf(sc, "Failed to reset NHI on resume: %d\n", error);
+		return (error);
+	}
+
+	/*
+	 * Reset software ring state.  Zero out descriptor ring memory so no
+	 * stale DONE bits confuse nhi_intr.
+	 */
+	mtx_lock(&r->mtx);
+	r->tx_pi = r->tx_ci = 0;
+	r->rx_pi = r->rx_ci = 0;
+
+	bzero(r->tx_ring, r->tx_ring_depth * sizeof(union nhi_ring_desc));
+	bzero(r->rx_ring, r->rx_ring_depth * sizeof(union nhi_ring_desc));
+
+	for (i = 0; i < r->tx_ring_depth; i++)
+		r->tx_cmd_ring[i] = NULL;
+	for (i = 0; i < r->rx_ring_depth; i++)
+		r->rx_cmd_ring[i] = NULL;
+
+	/*
+	 * Rebuild the TX and RX free lists from the existing cmd frame array.
+	 * Same logic as nhi_alloc_ring0 but without allocating new memory.
+	 */
+	TAILQ_INIT(&r->rx_head);
+	TAILQ_INIT(&r->tx_head);
+
+	for (i = 0; i < r->rx_ring_depth; i++) {
+		cmd = &sc->ring0_cmds[i];
+		cmd->flags = CMD_MAPPED;
+		cmd->resp_buffer = NULL;
+		TAILQ_INSERT_TAIL(&r->rx_head, cmd, cm_link);
+	}
+	for (; i < r->tx_ring_depth + r->rx_ring_depth - 1; i++) {
+		cmd = &sc->ring0_cmds[i];
+		nhi_free_tx_frame_locked(r, cmd);
+	}
+	mtx_unlock(&r->mtx);
+
+	/* Reprogram MMIO ring registers, activate, and fill RX. */
+	nhi_configure_ring(sc, r);
+	nhi_activate_ring(r);
+	nhi_fill_rx_ring(sc, r);
+
+	/* Re-enable interrupt auto-clear. */
+	val = nhi_read_reg(sc, NHI_DMA_MISC);
+	val |= DMA_MISC_INT_AUTOCLEAR;
+	nhi_write_reg(sc, NHI_DMA_MISC, val);
+
+	return (tb_router_resume(rsc));
 }
 
 static void
