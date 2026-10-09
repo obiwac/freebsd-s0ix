@@ -39,6 +39,7 @@
 #include <dev/sound/pcm/sound.h>
 
 #include <sys/ctype.h>
+#include <sys/limits.h>
 
 #include <dev/sound/pci/hda/hdac.h>
 #include <dev/sound/pci/hda/hdaa.h>
@@ -389,10 +390,20 @@ hdac_pin_patch(struct hdaa_widget *w)
 			break;
 		}
 	} else if (id == HDA_CODEC_ALC295 &&
-	    subid == FRAMEWORK_LAPTOP_0006_SUBVENDOR) {
+	    (subid == FRAMEWORK_LAPTOP_0001_SUBVENDOR ||
+	    subid == FRAMEWORK_LAPTOP_0006_SUBVENDOR ||
+	    subid == FRAMEWORK_LAPTOP_000B_SUBVENDOR)) {
 		switch (nid) {
+		case 25:
+			/*
+			 * Its presence detection reports the jack as occupied
+			 * even when it is empty, so ignore it.
+			 */
+			patch_str = "as=3 seq=15 misc=1 conn=Jack "
+			    "color=Black ctype=1/8 device=Mic loc=Right";
+			break;
 		case 33:
-			patch_str = "as=1 seq=15 color=Black loc=Left";
+			patch_str = "as=1 seq=15 color=Black";
 			break;
 		}
 	} else if (id == HDA_CODEC_ALC230 &&
@@ -760,6 +771,23 @@ hdaa_write_coef(device_t dev, nid_t nid, uint16_t idx, uint16_t val)
 	return (hda_command(dev, HDA_CMD_SET_PROCESSING_COEFF(0, nid, val)));
 }
 
+static uint32_t
+hdaa_update_coef(device_t dev, nid_t nid, uint16_t idx, uint16_t mask,
+    uint16_t val)
+{
+	uint16_t curr;
+
+	hda_command(dev, HDA_CMD_SET_COEFF_INDEX(0, nid, idx));
+	curr = hda_command(dev, HDA_CMD_GET_PROCESSING_COEFF(0, nid));
+	if (curr != USHRT_MAX) {
+		val = (curr & ~mask) | val;
+		hda_command(dev, HDA_CMD_SET_COEFF_INDEX(0, nid, idx));
+		val = hda_command(dev, HDA_CMD_SET_PROCESSING_COEFF(0, nid,
+		    val));
+	}
+	return val;
+}
+
 void
 hdaa_patch_direct(struct hdaa_devinfo *devinfo)
 {
@@ -818,5 +846,31 @@ hdaa_patch_direct(struct hdaa_devinfo *devinfo)
 			/* Increase output amp on ASUS UX31A by +5dB. */
 			hdaa_write_coef(dev, 0x20, 0x12, 0x2800);
 		}
+	}
+	if (id == HDA_CODEC_ALC295 &&
+	    (subid == FRAMEWORK_LAPTOP_0001_SUBVENDOR ||
+	    subid == FRAMEWORK_LAPTOP_0006_SUBVENDOR ||
+	    subid == FRAMEWORK_LAPTOP_000B_SUBVENDOR)) {
+		/*
+		 * Put the jack in CTIA headset mode, so that headset
+		 * microphone can work. By default the jack is in
+		 * headphone-only mode.
+		 *
+		 * The coefficients are undocumented and taken from Linux's
+		 * Realtek patches.
+		 */
+		hdaa_update_coef(dev, 0x20, 0x4a, 1 << 8, 0);
+		hdaa_update_coef(dev, 0x57, 0x05, 1 << 14, 0);
+		hdaa_update_coef(dev, 0x20, 0x63, 3 << 14, 3 << 14);
+		hdaa_update_coef(dev, 0x20, 0x4a, 3 << 4, 2 << 4);
+		hdaa_update_coef(dev, 0x20, 0x4a, 3 << 10, 3 << 10);
+		hdaa_update_coef(dev, 0x20, 0x45, 0x3f << 10, 0x34 << 10);
+		hdaa_update_coef(dev, 0x20, 0x4a, 3 << 10, 0);
+
+		val = hdaa_read_coef(dev, 0x20, 0x45);
+		hdaa_update_coef(dev, 0x20, 0x45, 0x3f << 10, 0x35 << 10);
+		if (val != HDA_INVALID)
+			hdaa_update_coef(dev, 0x20, 0x63, 3 << 14,
+			    (val & (1 << 9)) ? 1 << 14 : 2 << 14);
 	}
 }
