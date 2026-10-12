@@ -503,6 +503,7 @@ acpi_d_state_to_str(int state)
 }
 
 char		*acpi_name(ACPI_HANDLE handle);
+bool		acpi_get_name(ACPI_HANDLE handle, char *data, size_t len);
 int		acpi_avoid(ACPI_HANDLE handle);
 int		acpi_disabled(char *subsys);
 int		acpi_get_acpi_device_path(device_t bus, device_t child,
