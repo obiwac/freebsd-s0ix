@@ -232,6 +232,7 @@ static ACPI_STATUS	EcWrite(struct acpi_ec_softc *sc, UINT8 Address,
 static int		acpi_ec_probe(device_t dev);
 static int		acpi_ec_attach(device_t dev);
 static int		acpi_ec_suspend(device_t dev);
+static void		acpi_ec_rearm_events(struct acpi_ec_softc *sc);
 static int		acpi_ec_resume(device_t dev);
 static int		acpi_ec_shutdown(device_t dev);
 static int		acpi_ec_read_method(device_t dev, u_int addr,
@@ -556,12 +557,49 @@ acpi_ec_suspend(device_t dev)
     return (0);
 }
 
+/*
+ * Some embedded controllers (e.g., the Lenovo H8 EC found in ThinkPad
+ * E14 laptops) stop reporting SCI events after a suspend/resume cycle:
+ * events are neither queued nor signalled until the host performs a
+ * burst enable/disable handshake.  Perform that handshake to re-arm
+ * the EC event engine.  It is part of the ACPI EC protocol and is
+ * harmless for ECs that do not need it.
+ */
+static void
+acpi_ec_rearm_events(struct acpi_ec_softc *sc)
+{
+    ACPI_STATUS			status;
+
+    /*
+     * Waits are polled (ec_suspending is still TRUE), since the EC GPE
+     * is not yet re-enabled when this runs.
+     */
+    status = EcLock(sc);
+    if (ACPI_FAILURE(status))
+	return;
+    status = EcWaitEvent(sc, EC_EVENT_INPUT_BUFFER_EMPTY, 0);
+    if (ACPI_SUCCESS(status)) {
+	EC_SET_CSR(sc, EC_COMMAND_BURST_ENABLE);
+	(void)EcWaitEvent(sc, EC_EVENT_OUTPUT_BUFFER_FULL, sc->ec_gencount);
+	/* Consume the burst acknowledge byte, if any. */
+	if (EC_GET_CSR(sc) & EC_FLAG_OUTPUT_BUFFER)
+	    (void)EC_GET_DATA(sc);
+
+	/* Leaving burst mode re-arms EC event reporting. */
+	status = EcWaitEvent(sc, EC_EVENT_INPUT_BUFFER_EMPTY, 0);
+	if (ACPI_SUCCESS(status))
+	    EC_SET_CSR(sc, EC_COMMAND_BURST_DISABLE);
+    }
+    EcUnlock(sc);
+}
+
 static int
 acpi_ec_resume(device_t dev)
 {
     struct acpi_ec_softc	*sc;
 
     sc = device_get_softc(dev);
+    acpi_ec_rearm_events(sc);
     sc->ec_suspending = FALSE;
     return (0);
 }
