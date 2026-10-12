@@ -4443,6 +4443,19 @@ acpi_name(ACPI_HANDLE handle)
     return ("(unknown)");
 }
 
+bool
+acpi_get_name(ACPI_HANDLE handle, char *data, size_t len)
+{
+    ACPI_BUFFER buf;
+
+    buf.Length = len;
+    buf.Pointer = data;
+
+    if (handle && ACPI_SUCCESS(AcpiGetName(handle, ACPI_FULL_PATHNAME, &buf)))
+	return (true);
+    return (false);
+}
+
 /*
  * Debugging/bug-avoidance.  Avoid trying to fetch info on various
  * parts of the namespace.
