@@ -269,6 +269,13 @@
 	    int, cpu)							\
 									\
 	/*								\
+	 * Force scheduler to always select the idle thread.  Used as a \				\
+	 * stopgap solution for suspend-to-idle.			\
+	 */								\
+	FUN((__VA_ARGS__), void, do_idle,				\
+	    struct thread *, td, bool, do_idle)				\
+									\
+	/*								\
 	 * Fixup scheduler state for secondary APs			\
 	 */								\
 	FUN((__VA_ARGS__), void, init_ap)

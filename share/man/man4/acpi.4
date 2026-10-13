@@ -110,6 +110,19 @@ latency when an interrupt occurs.
 .It Va dev.cpu.N.cx_method
 List of supported CPU idle states and their transition methods, as
 directed by the firmware.
+.It Va hw.acpi.cpu.disable_idle_on_suspend
+Disable entry to idle C-states during suspend and resume.
+When enabled, the idle thread will return immediately rather than
+attempting to enter
+.Li C1 Ns \[en] Ns Li Cn
+states while the suspend path is executing.
+.Pp
+This is a workaround for certain chipsets such as the Panasonic Y4.
+.Pp
+Enabling this sysctl prevents CPUs from reaching the deep C-states
+required for S0ix (suspend-to-idle), so it should be left disabled
+on systems that intend to use
+.Li suspend_to_idle .
 .It Va hw.acpi.acline
 AC line state (1 means online, 0 means on battery power).
 .It Va hw.acpi.disable_on_reboot
