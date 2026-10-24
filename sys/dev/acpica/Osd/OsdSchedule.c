@@ -254,13 +254,16 @@ AcpiOsSleep(UINT64 Milliseconds)
     timo = Milliseconds * hz / 1000;
 
     /*
-     * If requested sleep time is less than our hz resolution, use
-     * DELAY instead for better granularity.
+     * When clock is suspended, pause() would block indefinitely, so use
+     * DELAY() instead.
+     *
+     * If requested sleep time is less than our hz resolution, also use DELAY()
+     * instead for better granularity.
      */
-    if (timo > 0)
-	pause("acpislp", timo);
-    else
+    if (clock_suspended || timo == 0)
 	DELAY(Milliseconds * 1000);
+    else
+	pause("acpislp", timo);
 
     return_VOID;
 }
