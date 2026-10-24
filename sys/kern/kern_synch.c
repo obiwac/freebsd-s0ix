@@ -309,6 +309,8 @@ int
 pause_sbt(const char *wmesg, sbintime_t sbt, sbintime_t pr, int flags)
 {
 	KASSERT(sbt >= 0, ("pause_sbt: timeout must be >= 0"));
+	KASSERT(clock_suspended == false,
+	    ("pause_sbt: can't be used while clock suspended"));
 
 	/* silently convert invalid timeouts */
 	if (sbt == 0)
