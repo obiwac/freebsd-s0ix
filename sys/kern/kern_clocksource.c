@@ -58,6 +58,8 @@
 int			cpu_disable_c2_sleep = 0; /* Timer dies in C2. */
 int			cpu_disable_c3_sleep = 0; /* Timer dies in C3. */
 
+bool			clock_suspended = false;
+
 static void		setuptimer(void);
 static void		loadtimer(sbintime_t now, int first);
 static int		doconfigtimer(void);
@@ -696,6 +698,7 @@ cpu_initclocks_ap(void)
 void
 suspendclock(void)
 {
+	clock_suspended = true;
 	ET_LOCK();
 	configtimer(0);
 	ET_UNLOCK();
@@ -707,6 +710,7 @@ resumeclock(void)
 	ET_LOCK();
 	configtimer(1);
 	ET_UNLOCK();
+	clock_suspended = false;
 }
 
 /*
