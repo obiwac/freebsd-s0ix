@@ -53,6 +53,7 @@
 #include <sys/sbuf.h>
 #include <sys/sched.h>
 #include <sys/smp.h>
+#include <sys/taskqueue.h>
 #include <sys/timetc.h>
 #include <sys/uuid.h>
 
@@ -61,6 +62,7 @@
 #include <machine/intr_machdep.h>
 #include <machine/pci_cfgreg.h>
 #include <x86/cputypes.h>
+#include <x86/x86_smp.h>
 #include <x86/x86_var.h>
 #endif
 #include <machine/resource.h>
@@ -3640,6 +3642,10 @@ static void
 do_idle(struct acpi_softc *sc, enum acpi_sleep_state *slp_state,
     register_t rflags)
 {
+    struct pcpu		*pc;
+    cpuset_t		other_cpus;
+    struct monitorbuf	*mb;
+    size_t		intr_count;
 
     intr_suspend();
 
@@ -3647,7 +3653,7 @@ do_idle(struct acpi_softc *sc, enum acpi_sleep_state *slp_state,
      * The CPU will exit idle when interrupted, so we want to minimize the
      * number of interrupts it can receive while idle.  We do this by only
      * allowing SCI (system control interrupt) interrupts, which are used by
-     * the ACPI firmware to send wake GPEs to the OS.
+     * the ACPI firmware to send wake GPEs to OSPM.
      *
      * XXX We might still receive other spurious non-wake GPEs from noisy
      * devices that can't be disabled, so this will need to end up being a
@@ -3657,8 +3663,67 @@ do_idle(struct acpi_softc *sc, enum acpi_sleep_state *slp_state,
      */
     intr_enable_src(AcpiGbl_FADT.SciInterrupt);
 
-    cpu_idle(0);
+    sc->acpi_s2idle_wake = false;
 
+    /*
+     * Put all CPUs (except for this one, the BSP) in their idle loops.  They
+     * will immediately be preempted in sched_do_idle().
+     */
+    other_cpus = all_cpus;
+    CPU_CLR(curcpu, &other_cpus);
+
+    /* TODO Preempt all CPU schedulers to get them to enter their idle loop. */
+    smp_rendezvous_cpus(other_cpus, smp_no_rendezvous_barrier, NULL,
+	smp_no_rendezvous_barrier, NULL);
+
+    /*
+     * Suspend-to-idle loop.
+     *
+     * This is needed, because we might still receive other spurious non-wake
+     * GPEs (and, thus, SCI interrupts) from devices that can't be disabled.
+     * When breaking out of idle, we check the reason for the wakeup and
+     * immediately idle the CPU again if it was not a proper wake event.
+     */
+    for (intr_count = 0; !sc->acpi_s2idle_wake; intr_count++) {
+	/*
+	 * Actually idle the main CPU.  The only thing that will break us out of
+	 * this at this point is an SCI interrupt.
+	 */
+	cpu_idle(0);
+
+	/*
+	 * When we get an SCI from the platform, we don't actually handle the
+	 * GPE in the interrupt handler.  Instead, it gets added to the
+	 * acpi_taskq taskqueue.  Since we are interested in what this GPE is
+	 * (since it might we a wake event), we must wait until it has been
+	 * drained so we know if we should break out of the s2idle loop or if
+	 * we should reenter idle.
+	 *
+	 * XXX This is buggy because we're breaking out to the scheduler, and
+	 * other kernel threads might be scheduled and prevent us from getting
+	 * scheduled again in a timely manner (or, theoretically, at all).
+	 */
+	extern struct taskqueue *acpi_taskq;
+	taskqueue_quiesce(acpi_taskq);
+
+	/* Check that all APs are still idled, and warn if not. */
+	STAILQ_FOREACH(pc, &cpuhead, pc_allcpu) {
+	    if (pc->pc_cpuid == curcpu)
+		continue;
+	    mb = &pc->pc_monitorbuf;
+	    if (atomic_load_int(&mb->idle_state) != 0x2 /* TODO STATE_SLEEPING */)
+		printf("CPU%d was not sleeping after breaking out of BSP "
+		    "cpu_idle()!\n", pc->pc_cpuid);
+	}
+    }
+    device_printf(sc->acpi_dev, "Suspend-to-idle interrupted %zu times.\n",
+	intr_count);
+
+    /* TODO Preempt all schedulers to kick CPUs out of idle. */
+    smp_rendezvous_cpus(other_cpus, smp_no_rendezvous_barrier, NULL,
+	smp_no_rendezvous_barrier, NULL);
+
+    /* Resume interrupts. */
     intr_resume(false);
     intr_restore(rflags);
     *slp_state |= ACPI_SS_SLEPT;
@@ -4226,7 +4291,8 @@ acpi_system_eventhandler_wakeup(struct acpi_softc *const sc,
 {
     ACPI_FUNCTION_TRACE_U32((char *)(uintptr_t)__func__, stype);
 
-    /* Currently, nothing to do for wakeup. */
+    sc->acpi_s2idle_wake = true;
+
     return_VOID;
 }
 
@@ -4274,6 +4340,8 @@ acpi_event_power_button_sleep(struct acpi_softc *sc)
 {
     ACPI_FUNCTION_TRACE((char *)(uintptr_t)__func__);
 
+    sc->acpi_s2idle_wake = true;
+
 #if defined(__amd64__) || defined(__i386__)
     if (acpi_button_resume_replay(sc, "power"))
 	return_VALUE (ACPI_INTERRUPT_HANDLED);
@@ -4293,6 +4361,8 @@ acpi_event_power_button_wake(struct acpi_softc *sc)
 {
     ACPI_FUNCTION_TRACE((char *)(uintptr_t)__func__);
 
+    sc->acpi_s2idle_wake = true;
+
     if (ACPI_FAILURE(AcpiOsExecute(OSL_NOTIFY_HANDLER,
 	(ACPI_OSD_EXEC_CALLBACK)acpi_invoke_wake_eventhandler,
 	&sc->acpi_power_button_stype)))
@@ -4307,6 +4377,7 @@ acpi_event_sleep_button_sleep(struct acpi_softc *sc)
 
     if (acpi_button_resume_replay(sc, "sleep"))
 	return_VALUE (ACPI_INTERRUPT_HANDLED);
+    sc->acpi_s2idle_wake = true;
 
     if (ACPI_FAILURE(AcpiOsExecute(OSL_NOTIFY_HANDLER,
 	(ACPI_OSD_EXEC_CALLBACK)acpi_invoke_sleep_eventhandler,
@@ -4319,6 +4390,8 @@ UINT32
 acpi_event_sleep_button_wake(struct acpi_softc *sc)
 {
     ACPI_FUNCTION_TRACE((char *)(uintptr_t)__func__);
+
+    sc->acpi_s2idle_wake = true;
 
     if (ACPI_FAILURE(AcpiOsExecute(OSL_NOTIFY_HANDLER,
 	(ACPI_OSD_EXEC_CALLBACK)acpi_invoke_wake_eventhandler,
