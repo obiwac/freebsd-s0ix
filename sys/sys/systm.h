@@ -434,6 +434,7 @@ void	cpu_new_callout(int cpu, sbintime_t bt, sbintime_t bt_opt);
 void	cpu_et_frequency(struct eventtimer *et, uint64_t newfreq);
 extern int	cpu_disable_c2_sleep;
 extern int	cpu_disable_c3_sleep;
+extern bool	clock_suspended;
 
 char	*kern_getenv(const char *name);
 void	freeenv(char *env);
